@@ -1,0 +1,90 @@
+mod error;
+
+pub use error::SeerError;
+
+use clap::{CommandFactory, Parser};
+use std::io::IsTerminal;
+
+/// Successful CLI result. `exit` is 0 or 1.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunOutput {
+    pub stdout: String,
+    pub exit: i32,
+}
+
+#[derive(Parser)]
+#[command(
+    name = "seer",
+    version,
+    about = "Control-and-call outlines of source code",
+    color = clap::ColorChoice::Never
+)]
+struct Cli {}
+
+pub fn run(args: &[String]) -> Result<RunOutput, SeerError> {
+    run_with(args, std::io::stdin().is_terminal())
+}
+
+/// `stdin_is_terminal` is injected so `cli_tree_no_path_tty` does not need a pty.
+pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, SeerError> {
+    let _ = stdin_is_terminal;
+    let rest = args.get(1..).unwrap_or(&[]);
+    #[allow(clippy::match_same_arms)]
+    match rest.first().map(String::as_str) {
+        Some("-h" | "--help") => Ok(RunOutput {
+            stdout: Cli::command().render_help().to_string(),
+            exit: 0,
+        }),
+        Some("-V" | "--version") => Ok(RunOutput {
+            stdout: Cli::command().render_version().to_string(),
+            exit: 0,
+        }),
+        Some("tree") => Err(SeerError::NotImplemented),
+        Some("diff") => Err(SeerError::NotImplemented),
+        Some("diff-trees") => Err(SeerError::NotImplemented),
+        Some(_) => Err(SeerError::NotImplemented),
+        None => Err(SeerError::NotImplemented),
+    }
+}
+
+/// `files` is (posix_relpath, rust_source_utf8). Sorted here if needed.
+/// Does **not** read the disk and does **not** take Cargo.toml bytes (v1).
+pub fn outline_files(_files: &[(String, String)]) -> String {
+    String::new()
+}
+
+/// Unified diff. Empty string iff `a == b`.
+pub fn diff_text(_a: &str, _b: &str, _name_a: &str, _name_b: &str) -> String {
+    String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_has_no_ansi() {
+        let out = run(&["seer".into(), "--help".into()]).unwrap();
+        assert_eq!(out.exit, 0);
+        assert!(!out.stdout.as_bytes().contains(&0x1b));
+        assert!(!out.stdout.is_empty());
+    }
+
+    #[test]
+    fn version_has_no_ansi() {
+        let out = run(&["seer".into(), "--version".into()]).unwrap();
+        assert_eq!(out.exit, 0);
+        assert!(!out.stdout.as_bytes().contains(&0x1b));
+        assert!(out.stdout.contains("seer"));
+    }
+
+    #[test]
+    fn outline_files_empty_input() {
+        assert_eq!(outline_files(&[]), "");
+    }
+
+    #[test]
+    fn diff_identical_empty() {
+        assert_eq!(diff_text("fn a\n", "fn a\n", "a", "b"), "");
+    }
+}
