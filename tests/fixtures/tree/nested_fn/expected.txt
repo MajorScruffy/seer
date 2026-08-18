@@ -1,0 +1,10 @@
+fn outer
+  fn inner
+    return
+  inner()
+    return
+
+fn other
+  fn unused
+    return
+  return

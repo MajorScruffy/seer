@@ -1,0 +1,10 @@
+fn process
+  if items.is_empty()
+    return
+  for item in items
+    if item.valid()
+      handle(item)
+        if !item.ready()
+          return
+        serde_json::to_string(item)
+        fs::write(path, data)

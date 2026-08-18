@@ -1,0 +1,7 @@
+fn a
+  b()
+    a() [recursive]
+
+fn b
+  a()
+    b() [recursive]

@@ -1,0 +1,9 @@
+fn f
+  match x
+    0
+      return
+    1 | 2
+      foo()
+    n if n > 10
+      return
+    _

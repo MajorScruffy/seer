@@ -2,16 +2,19 @@ mod error;
 
 pub mod collapse;
 pub mod collect;
+pub mod entry;
+pub mod expand;
 pub mod extract;
 pub mod ir;
 pub mod lang;
 pub mod omit;
 pub mod parse;
 pub mod print;
+pub mod resolve;
 
 pub use collapse::{collapse, collapse_node, strip_std};
 pub use error::SeerError;
-pub use ir::{CallKind, CallSite, FnId, FnKind, Outline, OutlineNode, RawNode};
+pub use ir::{CallKind, CallSite, FnDef, FnId, FnKind, Outline, OutlineNode, RawNode};
 pub use print::print;
 
 use clap::{CommandFactory, Parser};
@@ -62,31 +65,20 @@ pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, S
 /// `files` is (posix_relpath, rust_source_utf8). Sorted here if needed.
 /// Does **not** read the disk and does **not** take Cargo.toml bytes (v1).
 pub fn outline_files(files: &[(String, String)]) -> String {
-    let mut printed: Vec<(&str, usize, String)> = Vec::new();
-    for (path, src) in files {
-        let tree = parse::parse_rust(src);
-        let uses = omit::UseMap::from_tree(tree.root_node(), src);
-        let mut fns = extract::root_function_items(tree.root_node());
-        fns.sort_by_key(tree_sitter::Node::start_byte);
-        for fn_item in fns {
-            let name = lang::rust::fn_name(fn_item, src);
-            let body = extract::extract_fn(fn_item, src, path, &uses);
-            printed.push((
-                path.as_str(),
-                fn_item.start_byte(),
-                extract::print_raw_fn(&name, &body),
-            ));
-        }
+    let index = resolve::index_files(files);
+    let called = entry::called_targets(&index);
+    let entries = entry::select_entries(&index, &called);
+    let mut roots = Vec::new();
+    for id in entries {
+        let def = index.def(&id).expect("entry is indexed");
+        let mut stack = Vec::new();
+        let children = expand::expand_fn(def, &mut stack, &index);
+        roots.push(ir::OutlineNode {
+            text: format!("fn {}", def.name),
+            children,
+        });
     }
-    printed.sort_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(&b.1)));
-    let mut out = String::new();
-    for (i, (_, _, text)) in printed.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        out.push_str(text);
-    }
-    out
+    print::print(&ir::Outline { roots })
 }
 
 /// Unified diff. Empty string iff `a == b`.

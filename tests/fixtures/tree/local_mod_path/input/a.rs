@@ -1,0 +1,3 @@
+fn process() {
+    foo::bar();
+}
