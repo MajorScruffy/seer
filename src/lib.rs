@@ -1,3 +1,4 @@
+mod cli;
 mod error;
 
 pub mod collapse;
@@ -17,9 +18,6 @@ pub use error::SeerError;
 pub use ir::{CallKind, CallSite, FnDef, FnId, FnKind, Outline, OutlineNode, RawNode};
 pub use print::print;
 
-use clap::{CommandFactory, Parser};
-use std::io::IsTerminal;
-
 /// Successful CLI result. `exit` is 0 or 1.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunOutput {
@@ -27,39 +25,13 @@ pub struct RunOutput {
     pub exit: i32,
 }
 
-#[derive(Parser)]
-#[command(
-    name = "seer",
-    version,
-    about = "Control-and-call outlines of source code",
-    color = clap::ColorChoice::Never
-)]
-struct Cli {}
-
 pub fn run(args: &[String]) -> Result<RunOutput, SeerError> {
-    run_with(args, std::io::stdin().is_terminal())
+    cli::run(args)
 }
 
 /// `stdin_is_terminal` is injected so `cli_tree_no_path_tty` does not need a pty.
 pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, SeerError> {
-    let _ = stdin_is_terminal;
-    let rest = args.get(1..).unwrap_or(&[]);
-    #[allow(clippy::match_same_arms)]
-    match rest.first().map(String::as_str) {
-        Some("-h" | "--help") => Ok(RunOutput {
-            stdout: Cli::command().render_help().to_string(),
-            exit: 0,
-        }),
-        Some("-V" | "--version") => Ok(RunOutput {
-            stdout: Cli::command().render_version().to_string(),
-            exit: 0,
-        }),
-        Some("tree") => Err(SeerError::NotImplemented),
-        Some("diff") => Err(SeerError::NotImplemented),
-        Some("diff-trees") => Err(SeerError::NotImplemented),
-        Some(_) => Err(SeerError::NotImplemented),
-        None => Err(SeerError::NotImplemented),
-    }
+    cli::run_with(args, stdin_is_terminal)
 }
 
 /// `files` is (posix_relpath, rust_source_utf8). Sorted here if needed.
@@ -104,6 +76,12 @@ mod tests {
         assert_eq!(out.exit, 0);
         assert!(!out.stdout.as_bytes().contains(&0x1b));
         assert!(out.stdout.contains("seer"));
+    }
+
+    #[test]
+    fn cli_tree_no_path_tty() {
+        let err = run_with(&["seer".into(), "tree".into()], true).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
     }
 
     #[test]
