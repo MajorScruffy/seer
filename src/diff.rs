@@ -11,15 +11,41 @@ pub fn diff_text(a: &str, b: &str, name_a: &str, name_b: &str) -> String {
     unified_diff(&split_keepends(a), &split_keepends(b), name_a, name_b)
 }
 
+/// Python `str.splitlines` breaks, including `\r\n` as one terminator.
+fn is_splitlines_eol(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '\r'
+            | '\u{0B}'
+            | '\u{0C}'
+            | '\u{1C}'
+            | '\u{1D}'
+            | '\u{1E}'
+            | '\u{85}'
+            | '\u{2028}'
+            | '\u{2029}'
+    )
+}
+
+/// Same as Python `str.splitlines(keepends=True)`: `\r\n` stays one line.
 fn split_keepends(s: &str) -> Vec<&str> {
     if s.is_empty() {
         return Vec::new();
     }
     let mut lines = Vec::new();
     let mut start = 0;
-    for (i, _) in s.match_indices('\n') {
-        lines.push(&s[start..=i]);
-        start = i + 1;
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let end = if c == '\r' && chars.peek().is_some_and(|(_, n)| *n == '\n') {
+            chars.next();
+            i + 2
+        } else if is_splitlines_eol(c) {
+            i + c.len_utf8()
+        } else {
+            continue;
+        };
+        lines.push(&s[start..end]);
+        start = end;
     }
     if start < s.len() {
         lines.push(&s[start..]);
@@ -311,5 +337,41 @@ mod tests {
     fn empty_to_content_hunk_is_zero_zero() {
         let d = diff_text("", "fn f\n  return\n", "a", "b");
         assert_eq!(d, "--- a\n+++ b\n@@ -0,0 +1,2 @@\n+fn f\n+  return\n");
+    }
+
+    #[test]
+    fn split_keepends_matches_python() {
+        let cases: &[(&str, &[&str])] = &[
+            ("", &[]),
+            ("a", &["a"]),
+            ("a\nb", &["a\n", "b"]),
+            ("a\rb", &["a\r", "b"]),
+            ("a\r\nb", &["a\r\n", "b"]),
+            ("a\x0bb", &["a\x0b", "b"]),
+            ("a\x0cb", &["a\x0c", "b"]),
+            ("a\x1cb", &["a\x1c", "b"]),
+            ("a\x1db", &["a\x1d", "b"]),
+            ("a\x1eb", &["a\x1e", "b"]),
+            ("a\u{85}b", &["a\u{85}", "b"]),
+            ("a\u{2028}b", &["a\u{2028}", "b"]),
+            ("a\u{2029}b", &["a\u{2029}", "b"]),
+            ("a\r\rb", &["a\r", "\r", "b"]),
+            ("a\n\rb", &["a\n", "\r", "b"]),
+            ("a\r\n\r\nb", &["a\r\n", "\r\n", "b"]),
+            ("\r\n", &["\r\n"]),
+            ("\r", &["\r"]),
+            ("x\u{85}\u{85}y", &["x\u{85}", "\u{85}", "y"]),
+        ];
+        for &(input, expected) in cases {
+            assert_eq!(split_keepends(input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn lone_cr_hunk_matches_difflib() {
+        assert_eq!(
+            diff_text("a\rb\n", "a\rc\n", "a", "b"),
+            "--- a\n+++ b\n@@ -1,2 +1,2 @@\n a\r-b\n+c\n"
+        );
     }
 }
