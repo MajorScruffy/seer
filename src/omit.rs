@@ -27,25 +27,22 @@ impl UseMap {
         map
     }
 
-    /// Rewrite the first segment through file-scoped `use` bindings (and globs).
-    pub fn canonicalize(&self, path: &[String]) -> Vec<Vec<String>> {
+    /// Named `use` rewrite of the first segment. Globs are not applied.
+    pub fn rewrite_named(&self, path: &[String]) -> Vec<String> {
         if path.is_empty() {
             return Vec::new();
         }
         if let Some(bound) = self.bindings.get(&path[0]) {
             let mut out = bound.clone();
             out.extend(path.iter().skip(1).cloned());
-            return vec![out];
+            return out;
         }
-        let mut outs = vec![path.to_vec()];
-        if path.len() == 1 {
-            for glob in &self.globs {
-                let mut p = glob.clone();
-                p.extend(path.iter().cloned());
-                outs.push(p);
-            }
-        }
-        outs
+        path.to_vec()
+    }
+
+    /// Glob prefixes (`use foo::*;`). Kept for resolve; omit must not use these.
+    pub fn globs(&self) -> &[Vec<String>] {
+        &self.globs
     }
 }
 
@@ -62,9 +59,10 @@ pub fn should_omit(site: &CallSite, uses: &UseMap) -> bool {
             }
         }
     }
-    uses.canonicalize(path)
-        .into_iter()
-        .any(|canon| matches!(canon.first().map(String::as_str), Some("log" | "tracing")))
+    matches!(
+        uses.rewrite_named(path).first().map(String::as_str),
+        Some("log" | "tracing")
+    )
 }
 
 fn collect_use_decls(node: Node, src: &str, map: &mut UseMap) {
@@ -277,5 +275,21 @@ fn f() {
 }
 "#;
         assert_eq!(outline_of(src, "f"), "fn f\n  return\n");
+    }
+
+    #[test]
+    fn omit_glob_keeps_unqualified() {
+        let src = r#"
+use tracing::*;
+fn f() {
+    todo!();
+    foo();
+    return;
+}
+"#;
+        assert_eq!(outline_of(src, "f"), "fn f\n  todo!()\n  foo()\n  return\n");
+        let tree = parse_rust(src);
+        let uses = UseMap::from_tree(tree.root_node(), src);
+        assert_eq!(uses.globs(), &[vec!["tracing".to_string()]]);
     }
 }

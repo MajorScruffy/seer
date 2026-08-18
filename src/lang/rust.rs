@@ -23,6 +23,7 @@ pub const ASSIGNMENT_EXPRESSION: &str = "assignment_expression";
 pub const COMPOUND_ASSIGNMENT: &str = "compound_assignment_expr";
 pub const ERROR: &str = "ERROR";
 pub const LABEL: &str = "label";
+pub const BLOCK: &str = "block";
 pub const FIELD_EXPRESSION: &str = "field_expression";
 pub const GENERIC_FUNCTION: &str = "generic_function";
 pub const IMPL_ITEM: &str = "impl_item";
@@ -36,6 +37,18 @@ pub fn node_text<'a>(node: Node, src: &'a str) -> &'a str {
 
 pub fn first_named_child(node: Node) -> Option<Node> {
     node.named_child(0)
+}
+
+/// First named child whose kind is one of `kinds` (skips extras such as comments).
+pub fn first_named_child_kind<'a>(node: Node<'a>, kinds: &[&str]) -> Option<Node<'a>> {
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if kinds.iter().any(|k| child.kind() == *k) {
+                return Some(child);
+            }
+        }
+    }
+    None
 }
 
 pub fn fn_name(node: Node, src: &str) -> String {

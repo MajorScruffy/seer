@@ -3,8 +3,8 @@ use tree_sitter::Node;
 use crate::collapse::{collapse_node, strip_std};
 use crate::ir::{CallSite, Outline, OutlineNode, RawNode};
 use crate::lang::rust::{
-    self, call_kind, first_named_child, fn_name, header_for, header_if, header_loop, header_match,
-    header_while, path_segments,
+    self, call_kind, first_named_child, first_named_child_kind, fn_name, header_for, header_if,
+    header_loop, header_match, header_while, path_segments,
 };
 use crate::omit::{should_omit, UseMap};
 use crate::print;
@@ -98,7 +98,7 @@ fn walk(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         }
         rust::TRY_BLOCK => vec![RawNode::Control {
             text: "try".to_string(),
-            children: first_named_child(node)
+            children: first_named_child_kind(node, &[rust::BLOCK])
                 .map(|b| walk(b, ctx))
                 .unwrap_or_default(),
         }],
@@ -177,7 +177,7 @@ fn extract_if(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         let Some(alt) = current.child_by_field_name("alternative") else {
             break;
         };
-        let Some(child) = first_named_child(alt) else {
+        let Some(child) = first_named_child_kind(alt, &[rust::IF_EXPRESSION, rust::BLOCK]) else {
             break;
         };
         if child.kind() == rust::IF_EXPRESSION {
@@ -416,6 +416,34 @@ fn valid(&self) -> bool {
 }
 "#;
         assert_eq!(outline_of(src, "valid"), "fn valid\n  return true\n");
+    }
+
+    #[test]
+    fn extract_try_else_skip_leading_comments() {
+        let src = r#"
+fn f() {
+    try /* c */ {
+        foo();
+    }
+    if x {
+        return;
+    } else /* c */ {
+        bar();
+    }
+}
+"#;
+        assert_eq!(
+            outline_of(src, "f"),
+            "\
+fn f
+  try
+    foo()
+  if x
+    return
+  else
+    bar()
+"
+        );
     }
 
     #[test]
