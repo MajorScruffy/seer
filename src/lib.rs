@@ -3,6 +3,7 @@ mod error;
 
 pub mod collapse;
 pub mod collect;
+pub mod diff;
 pub mod entry;
 pub mod expand;
 pub mod extract;
@@ -14,6 +15,7 @@ pub mod print;
 pub mod resolve;
 
 pub use collapse::{collapse, collapse_node, strip_std};
+pub use diff::diff_text;
 pub use error::SeerError;
 pub use ir::{CallKind, CallSite, FnDef, FnId, FnKind, Outline, OutlineNode, RawNode};
 pub use print::print;
@@ -51,11 +53,6 @@ pub fn outline_files(files: &[(String, String)]) -> String {
         });
     }
     print::print(&ir::Outline { roots })
-}
-
-/// Unified diff. Empty string iff `a == b`.
-pub fn diff_text(_a: &str, _b: &str, _name_a: &str, _name_b: &str) -> String {
-    String::new()
 }
 
 #[cfg(test)]

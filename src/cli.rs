@@ -1,8 +1,10 @@
 use clap::{error::ErrorKind, CommandFactory, Parser};
-use std::io::IsTerminal;
+use std::fs;
+use std::io::{self, IsTerminal};
+use std::path::Path;
 
 use crate::collect::{collect_path, collect_stdin};
-use crate::{outline_files, RunOutput, SeerError};
+use crate::{diff_text, outline_files, RunOutput, SeerError};
 
 #[derive(Parser)]
 #[command(
@@ -26,6 +28,22 @@ struct TreeArgs {
     path: Option<String>,
 }
 
+#[derive(Parser)]
+#[command(
+    name = "seer diff-trees",
+    version,
+    about = "Diff two outline text files",
+    color = clap::ColorChoice::Never
+)]
+struct DiffTreesArgs {
+    /// Old outline text
+    #[arg(value_name = "A")]
+    a: String,
+    /// New outline text
+    #[arg(value_name = "B")]
+    b: String,
+}
+
 pub(crate) fn run(args: &[String]) -> Result<RunOutput, SeerError> {
     run_with(args, std::io::stdin().is_terminal())
 }
@@ -45,7 +63,11 @@ pub(crate) fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOu
             TreeParse::HelpOrVersion(out) => Ok(out),
             TreeParse::Args(tree) => run_tree(tree.path.as_deref(), stdin_is_terminal),
         },
-        Some("diff" | "diff-trees") | None => Err(SeerError::NotImplemented),
+        Some("diff-trees") => match parse_diff_trees_args(&rest[1..])? {
+            DiffTreesParse::HelpOrVersion(out) => Ok(out),
+            DiffTreesParse::Args(args) => run_diff_trees(&args.a, &args.b),
+        },
+        Some("diff") | None => Err(SeerError::NotImplemented),
         Some(path) => {
             if rest.len() > 1 {
                 return Err(SeerError::Usage("unexpected arguments".into()));
@@ -77,10 +99,52 @@ fn parse_tree_args(rest: &[String]) -> Result<TreeParse, SeerError> {
     }
 }
 
+enum DiffTreesParse {
+    HelpOrVersion(RunOutput),
+    Args(DiffTreesArgs),
+}
+
+fn parse_diff_trees_args(rest: &[String]) -> Result<DiffTreesParse, SeerError> {
+    let mut argv = vec!["seer".to_string()];
+    argv.extend_from_slice(rest);
+    match DiffTreesArgs::try_parse_from(&argv) {
+        Ok(args) => Ok(DiffTreesParse::Args(args)),
+        Err(err) => match err.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                Ok(DiffTreesParse::HelpOrVersion(RunOutput {
+                    stdout: err.to_string(),
+                    exit: 0,
+                }))
+            }
+            _ => Err(clap_usage(err)),
+        },
+    }
+}
+
 fn clap_usage(err: clap::Error) -> SeerError {
     let msg = err.to_string();
     let msg = msg.strip_prefix("error: ").unwrap_or(&msg);
     SeerError::Usage(msg.to_string())
+}
+
+fn run_diff_trees(path_a: &str, path_b: &str) -> Result<RunOutput, SeerError> {
+    let a = read_outline_text(path_a)?;
+    let b = read_outline_text(path_b)?;
+    let stdout = diff_text(&a, &b, path_a, path_b);
+    let exit = if stdout.is_empty() { 0 } else { 1 };
+    Ok(RunOutput { stdout, exit })
+}
+
+/// Read outline text as-is; do not parse as Rust.
+fn read_outline_text(path: &str) -> Result<String, SeerError> {
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(SeerError::Io(format!("path not found: {path}")));
+        }
+        Err(e) => return Err(SeerError::Io(format!("{}: {e}", Path::new(path).display()))),
+    };
+    String::from_utf8(bytes).map_err(|_| SeerError::Io(format!("invalid utf-8: {path}")))
 }
 
 fn run_tree(path: Option<&str>, stdin_is_terminal: bool) -> Result<RunOutput, SeerError> {
