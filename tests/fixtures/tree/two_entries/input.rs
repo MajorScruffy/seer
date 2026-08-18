@@ -1,0 +1,7 @@
+fn a() {
+    return;
+}
+
+fn b() {
+    return;
+}
