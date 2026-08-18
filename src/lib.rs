@@ -1,10 +1,14 @@
 mod error;
 
 pub mod collapse;
+pub mod extract;
 pub mod ir;
+pub mod lang;
+pub mod omit;
+pub mod parse;
 pub mod print;
 
-pub use collapse::{collapse, strip_std};
+pub use collapse::{collapse, collapse_node, strip_std};
 pub use error::SeerError;
 pub use ir::{CallKind, CallSite, FnId, FnKind, Outline, OutlineNode, RawNode};
 pub use print::print;
