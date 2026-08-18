@@ -260,3 +260,28 @@ fn git_invalid_rev() {
     assert!(err.contains("invalid revision"), "{err}");
     assert!(out.stdout.is_empty());
 }
+
+#[test]
+fn git_diff_too_many_revs() {
+    let too_many = ["diff", "a", "b", "c"];
+
+    let repo = init_repo();
+    let in_repo = seer(repo.path(), &too_many);
+    assert_eq!(
+        in_repo.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&in_repo.stderr)
+    );
+    assert!(in_repo.stdout.is_empty());
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = seer(dir.path(), &too_many);
+    assert_eq!(
+        outside.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&outside.stderr)
+    );
+    assert!(outside.stdout.is_empty());
+}

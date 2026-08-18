@@ -53,7 +53,7 @@ struct DiffTreesArgs {
 )]
 struct DiffArgs {
     /// Git revisions (0 = WORKTREE vs HEAD, 1 = WORKTREE vs REV, 2 = REV1 vs REV2)
-    #[arg(value_name = "REV")]
+    #[arg(value_name = "REV", num_args = 0..=2)]
     revs: Vec<String>,
 }
 
