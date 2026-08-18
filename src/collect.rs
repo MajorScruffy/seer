@@ -1,7 +1,62 @@
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use crate::SeerError;
+
+/// Collect sources for a CLI path argument. `-` is stdin (`<stdin>`), never a filesystem path.
+pub fn collect_path(path_arg: &str) -> Result<Vec<(String, String)>, SeerError> {
+    if path_arg == "-" {
+        return collect_stdin();
+    }
+    let path = Path::new(path_arg);
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(SeerError::Io(format!("path not found: {path_arg}")));
+        }
+        Err(e) => return Err(io_err(path, e)),
+    };
+    if meta.is_dir() {
+        collect_rs_files(path)
+    } else if meta.is_file() {
+        collect_one_file(path_arg, path)
+    } else {
+        Err(SeerError::Io(format!(
+            "not a file or directory: {path_arg}"
+        )))
+    }
+}
+
+/// One virtual file named `<stdin>`.
+pub fn collect_stdin() -> Result<Vec<(String, String)>, SeerError> {
+    let mut buf = Vec::new();
+    io::stdin()
+        .read_to_end(&mut buf)
+        .map_err(|e| SeerError::Io(format!("<stdin>: {e}")))?;
+    let src = String::from_utf8(buf).map_err(|_| SeerError::Io("invalid utf-8: <stdin>".into()))?;
+    Ok(vec![("<stdin>".into(), src)])
+}
+
+fn collect_one_file(path_arg: &str, path: &Path) -> Result<Vec<(String, String)>, SeerError> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !name.ends_with(".rs") {
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unknown");
+        return Err(SeerError::Io(format!(
+            "unsupported language: {ext} (v1 supports rust only)"
+        )));
+    }
+    // CLI single-file FnId.file is the argv spelling; only `\` → `/`.
+    let posix = path_arg.replace('\\', "/");
+    let bytes = fs::read(path).map_err(|e| io_err(path, e))?;
+    let src =
+        String::from_utf8(bytes).map_err(|_| SeerError::Io(format!("invalid utf-8: {posix}")))?;
+    Ok(vec![(posix, src)])
+}
 
 /// Regular `.rs` files under `root` as `(posix_relpath, utf8_source)`, sorted.
 pub fn collect_rs_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
@@ -108,6 +163,52 @@ mod tests {
         match collect_rs_files(dir.path()) {
             Err(SeerError::Io(msg)) => assert_eq!(msg, "invalid utf-8: bad.rs"),
             other => panic!("expected invalid utf-8, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_path_single_file_keeps_argv_spelling() {
+        let dir = tmp_tree();
+        let file = dir.path().join("sub/input.rs");
+        write(&file, "fn f() {}\n");
+        let arg = file.to_str().unwrap();
+        let files = collect_path(arg).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, arg.replace('\\', "/"));
+        assert_eq!(files[0].1, "fn f() {}\n");
+    }
+
+    #[test]
+    fn collect_path_missing() {
+        match collect_path("/no/such/file.rs") {
+            Err(SeerError::Io(msg)) => assert_eq!(msg, "path not found: /no/such/file.rs"),
+            other => panic!("expected missing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_path_unsupported() {
+        let dir = tmp_tree();
+        let file = dir.path().join("x.js");
+        write(&file, "1\n");
+        match collect_path(file.to_str().unwrap()) {
+            Err(SeerError::Io(msg)) => {
+                assert_eq!(msg, "unsupported language: js (v1 supports rust only)");
+            }
+            other => panic!("expected unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collect_path_unknown_extension() {
+        let dir = tmp_tree();
+        let file = dir.path().join("x");
+        write(&file, "1\n");
+        match collect_path(file.to_str().unwrap()) {
+            Err(SeerError::Io(msg)) => {
+                assert_eq!(msg, "unsupported language: unknown (v1 supports rust only)");
+            }
+            other => panic!("expected unknown, got {other:?}"),
         }
     }
 
