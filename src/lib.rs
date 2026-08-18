@@ -1,6 +1,13 @@
 mod error;
 
+pub mod collapse;
+pub mod ir;
+pub mod print;
+
+pub use collapse::{collapse, strip_std};
 pub use error::SeerError;
+pub use ir::{CallKind, CallSite, FnId, FnKind, Outline, OutlineNode, RawNode};
+pub use print::print;
 
 use clap::{CommandFactory, Parser};
 use std::io::IsTerminal;
