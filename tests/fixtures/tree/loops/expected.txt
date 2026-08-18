@@ -1,0 +1,7 @@
+fn f
+  loop
+    break
+  while true
+    continue
+  for item in items
+    return

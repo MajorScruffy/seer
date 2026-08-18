@@ -24,6 +24,32 @@ pub fn extract_fn(fn_item: Node, src: &str, file: &str, uses: &UseMap) -> Vec<Ra
         .unwrap_or_default()
 }
 
+/// Non-nested body-bearing `function_item`s (not trait signatures), source order.
+pub fn root_function_items<'a>(root: Node<'a>) -> Vec<Node<'a>> {
+    let mut out = Vec::new();
+    walk_root_fns(root, false, &mut out);
+    out
+}
+
+fn walk_root_fns<'a>(node: Node<'a>, in_fn: bool, out: &mut Vec<Node<'a>>) {
+    if node.kind() == rust::FUNCTION_ITEM {
+        if !in_fn && node.child_by_field_name("body").is_some() {
+            out.push(node);
+        }
+        for i in 0..node.named_child_count() {
+            if let Some(child) = node.named_child(i) {
+                walk_root_fns(child, true, out);
+            }
+        }
+        return;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            walk_root_fns(child, in_fn, out);
+        }
+    }
+}
+
 /// First `function_item` whose name field equals `name`.
 pub fn find_function_item<'a>(node: Node<'a>, src: &str, name: &str) -> Option<Node<'a>> {
     if node.kind() == rust::FUNCTION_ITEM && fn_name(node, src) == name {
@@ -444,6 +470,25 @@ fn f
     bar()
 "
         );
+    }
+
+    #[test]
+    fn root_function_items_skips_nested_and_signatures() {
+        let src = r#"
+trait T { fn sig(&self); }
+fn outer() {
+    fn inner() {}
+}
+impl X {
+    fn method() {}
+}
+"#;
+        let tree = parse_rust(src);
+        let names: Vec<String> = root_function_items(tree.root_node())
+            .into_iter()
+            .map(|n| fn_name(n, src))
+            .collect();
+        assert_eq!(names, vec!["outer", "method"]);
     }
 
     #[test]
