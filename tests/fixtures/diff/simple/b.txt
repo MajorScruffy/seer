@@ -1,0 +1,6 @@
+fn process
+  if items.is_empty()
+    return
+  for item in items
+    if item.valid()
+      handle(item)

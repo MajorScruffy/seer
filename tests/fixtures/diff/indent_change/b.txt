@@ -1,0 +1,4 @@
+fn f
+  if x
+    foo()
+      return

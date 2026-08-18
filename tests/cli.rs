@@ -133,6 +133,49 @@ fn cli_tree_missing() {
 }
 
 #[test]
+fn cli_diff_trees_simple() {
+    let out = run(&[
+        "diff-trees",
+        "tests/fixtures/diff/simple/a.txt",
+        "tests/fixtures/diff/simple/b.txt",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = "\
+--- tests/fixtures/diff/simple/a.txt
++++ tests/fixtures/diff/simple/b.txt
+@@ -2,4 +2,5 @@
+   if items.is_empty()
+     return
+   for item in items
+-    handle(item)
++    if item.valid()
++      handle(item)
+";
+    assert_eq!(out.stdout, expected.as_bytes());
+}
+
+#[test]
+fn cli_diff_trees_identical() {
+    let out = run(&[
+        "diff-trees",
+        "tests/fixtures/diff/identical/a.txt",
+        "tests/fixtures/diff/identical/b.txt",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
 fn cli_help_no_ansi() {
     let out = run(&["--help"]);
     assert_eq!(out.status.code(), Some(0));

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use seer::collect::collect_rs_files;
-use seer::outline_files;
+use seer::{diff_text, outline_files};
 
 #[test]
 fn tree_goldens() {
@@ -30,6 +30,39 @@ fn tree_goldens() {
         let expected = fs::read(dir.join("expected.txt"))
             .unwrap_or_else(|e| panic!("read expected.txt in {}: {e}", dir.display()));
         assert_bytes_eq(&name, &expected, actual.as_bytes());
+    }
+}
+
+#[test]
+fn diff_goldens() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/diff");
+    let mut names: Vec<String> = fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if entry.file_type().ok()?.is_dir() {
+                Some(entry.file_name().to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+    assert!(
+        !names.is_empty(),
+        "no diff fixtures under {}",
+        root.display()
+    );
+    for name in names {
+        let dir = root.join(&name);
+        let a = fs::read_to_string(dir.join("a.txt"))
+            .unwrap_or_else(|e| panic!("read a.txt in {}: {e}", dir.display()));
+        let b = fs::read_to_string(dir.join("b.txt"))
+            .unwrap_or_else(|e| panic!("read b.txt in {}: {e}", dir.display()));
+        let expected = fs::read(dir.join("expected.txt"))
+            .unwrap_or_else(|e| panic!("read expected.txt in {}: {e}", dir.display()));
+        let actual = diff_text(&a, &b, "a", "b");
+        assert_bytes_eq(&format!("diff/{name}"), &expected, actual.as_bytes());
     }
 }
 
