@@ -1,5 +1,6 @@
 mod cli;
 mod error;
+mod git;
 
 pub mod collapse;
 pub mod collect;

@@ -44,6 +44,19 @@ struct DiffTreesArgs {
     b: String,
 }
 
+#[derive(Parser)]
+#[command(
+    name = "seer diff",
+    version,
+    about = "Diff outlines of git revisions or the worktree",
+    color = clap::ColorChoice::Never
+)]
+struct DiffArgs {
+    /// Git revisions (0 = WORKTREE vs HEAD, 1 = WORKTREE vs REV, 2 = REV1 vs REV2)
+    #[arg(value_name = "REV")]
+    revs: Vec<String>,
+}
+
 pub(crate) fn run(args: &[String]) -> Result<RunOutput, SeerError> {
     run_with(args, std::io::stdin().is_terminal())
 }
@@ -67,7 +80,11 @@ pub(crate) fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOu
             DiffTreesParse::HelpOrVersion(out) => Ok(out),
             DiffTreesParse::Args(args) => run_diff_trees(&args.a, &args.b),
         },
-        Some("diff") | None => Err(SeerError::NotImplemented),
+        Some("diff") => match parse_diff_args(&rest[1..])? {
+            DiffParse::HelpOrVersion(out) => Ok(out),
+            DiffParse::Args(args) => crate::git::run(&args.revs),
+        },
+        None => crate::git::run(&[]),
         Some(path) => {
             if rest.len() > 1 {
                 return Err(SeerError::Usage("unexpected arguments".into()));
@@ -112,6 +129,28 @@ fn parse_diff_trees_args(rest: &[String]) -> Result<DiffTreesParse, SeerError> {
         Err(err) => match err.kind() {
             ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
                 Ok(DiffTreesParse::HelpOrVersion(RunOutput {
+                    stdout: err.to_string(),
+                    exit: 0,
+                }))
+            }
+            _ => Err(clap_usage(err)),
+        },
+    }
+}
+
+enum DiffParse {
+    HelpOrVersion(RunOutput),
+    Args(DiffArgs),
+}
+
+fn parse_diff_args(rest: &[String]) -> Result<DiffParse, SeerError> {
+    let mut argv = vec!["seer".to_string()];
+    argv.extend_from_slice(rest);
+    match DiffArgs::try_parse_from(&argv) {
+        Ok(args) => Ok(DiffParse::Args(args)),
+        Err(err) => match err.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                Ok(DiffParse::HelpOrVersion(RunOutput {
                     stdout: err.to_string(),
                     exit: 0,
                 }))
