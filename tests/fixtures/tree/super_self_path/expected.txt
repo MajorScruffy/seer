@@ -1,0 +1,5 @@
+fn process
+  super::bar()
+    return
+  self::local()
+    return

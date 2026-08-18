@@ -1,10 +1,10 @@
 use tree_sitter::Node;
 
 use crate::collapse::{collapse_node, strip_std};
-use crate::ir::{CallSite, Outline, OutlineNode, RawNode};
+use crate::ir::{CallSite, FnDef, FnId, Outline, OutlineNode, RawNode};
 use crate::lang::rust::{
-    self, call_kind, first_named_child, first_named_child_kind, fn_name, header_for, header_if,
-    header_loop, header_match, header_while, path_segments,
+    self, call_kind, classify_function_item, first_named_child, first_named_child_kind, fn_name,
+    header_for, header_if, header_loop, header_match, header_while, path_segments,
 };
 use crate::omit::{should_omit, UseMap};
 use crate::print;
@@ -13,6 +13,79 @@ struct Ctx<'a> {
     src: &'a str,
     file: &'a str,
     uses: &'a UseMap,
+}
+
+/// Index every `function_item` and `function_signature_item` under `root`.
+pub fn index_defs(
+    root: Node,
+    src: &str,
+    file: &str,
+    uses: &UseMap,
+    module: &[String],
+) -> Vec<FnDef> {
+    let mut out = Vec::new();
+    walk_index(root, src, file, uses, module, false, &mut out);
+    out
+}
+
+fn walk_index<'a>(
+    node: Node<'a>,
+    src: &str,
+    file: &str,
+    uses: &UseMap,
+    module: &[String],
+    in_fn: bool,
+    out: &mut Vec<FnDef>,
+) {
+    if node.kind() == rust::ERROR {
+        return;
+    }
+    if node.kind() == rust::FUNCTION_ITEM {
+        let has_body = node.child_by_field_name("body").is_some();
+        let body = if has_body {
+            extract_fn(node, src, file, uses)
+        } else {
+            Vec::new()
+        };
+        out.push(FnDef {
+            id: FnId {
+                file: file.to_string(),
+                start_byte: node.start_byte(),
+            },
+            name: fn_name(node, src),
+            kind: classify_function_item(node),
+            module: module.to_vec(),
+            nested: in_fn,
+            has_body,
+            body,
+        });
+        for i in 0..node.named_child_count() {
+            if let Some(child) = node.named_child(i) {
+                walk_index(child, src, file, uses, module, true, out);
+            }
+        }
+        return;
+    }
+    if node.kind() == rust::FUNCTION_SIGNATURE_ITEM {
+        out.push(FnDef {
+            id: FnId {
+                file: file.to_string(),
+                start_byte: node.start_byte(),
+            },
+            name: fn_name(node, src),
+            kind: classify_function_item(node),
+            module: module.to_vec(),
+            nested: in_fn,
+            has_body: false,
+            body: Vec::new(),
+        });
+        return;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            walk_index(child, src, file, uses, module, in_fn, out);
+        }
+    }
 }
 
 /// Unexpanded body of one `function_item`. Does not emit a `fn` line for `fn_item` itself.
@@ -257,6 +330,18 @@ fn emit_call(node: Node, ctx: &Ctx, is_macro: bool) -> Vec<RawNode> {
             .map(|f| call_kind(f, ctx.src))
             .unwrap_or(crate::ir::CallKind::Free { path: Vec::new() })
     };
+    // Tuple-struct / enum-variant constructors (`Some(1)`) are call_expression
+    // in the grammar but are not outline call sites (macros_stay).
+    if !is_macro {
+        if let crate::ir::CallKind::Free { path } = &kind {
+            if path
+                .last()
+                .is_some_and(|s| s.starts_with(|c: char| c.is_ascii_uppercase()))
+            {
+                return Vec::new();
+            }
+        }
+    }
     let site = CallSite {
         display: strip_std(&collapse_node(node, ctx.src)),
         kind,

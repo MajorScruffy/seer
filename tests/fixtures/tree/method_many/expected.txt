@@ -1,0 +1,6 @@
+fn valid
+
+fn valid
+
+fn process
+  a.valid()

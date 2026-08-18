@@ -1,0 +1,5 @@
+fn valid
+  return
+
+fn process
+  Item::valid(item)

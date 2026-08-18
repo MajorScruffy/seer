@@ -44,10 +44,27 @@ impl UseMap {
     pub fn globs(&self) -> &[Vec<String>] {
         &self.globs
     }
+
+    /// Named (non-glob) binding for `name`, if any.
+    pub fn binding(&self, name: &str) -> Option<&[String]> {
+        self.bindings.get(name).map(Vec::as_slice)
+    }
 }
 
-/// Steps 2–3 of the omit list. Step 1 (local never-omit) needs resolve.
+/// Syntactic omit (steps 2–3). Step 1 is `should_omit_resolved`.
 pub fn should_omit(site: &CallSite, uses: &UseMap) -> bool {
+    should_omit_resolved(site, uses, false)
+}
+
+/// Full omit list: a local expand target is never omitted.
+pub fn should_omit_resolved(site: &CallSite, uses: &UseMap, has_local_target: bool) -> bool {
+    if has_local_target {
+        return false;
+    }
+    should_omit_syntactic(site, uses)
+}
+
+fn should_omit_syntactic(site: &CallSite, uses: &UseMap) -> bool {
     let path = match &site.kind {
         CallKind::Free { path } => path.as_slice(),
         CallKind::Method { .. } => return false,

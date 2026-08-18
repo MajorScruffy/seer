@@ -4,29 +4,32 @@ use std::path::{Path, PathBuf};
 use seer::collect::collect_rs_files;
 use seer::outline_files;
 
-/// PR 4a: ignore any other tree fixture directory.
-const TREE_WHITELIST: &[&str] = &[
-    "empty_file",
-    "types_only",
-    "if_else_if_else",
-    "loops",
-    "two_entries",
-];
-
 #[test]
 fn tree_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tree");
-    for name in TREE_WHITELIST {
-        let dir = root.join(name);
-        assert!(
-            dir.is_dir(),
-            "missing whitelisted fixture directory: {}",
-            dir.display()
-        );
+    let mut names: Vec<String> = fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if entry.file_type().ok()?.is_dir() {
+                Some(entry.file_name().to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+    assert!(
+        !names.is_empty(),
+        "no tree fixtures under {}",
+        root.display()
+    );
+    for name in names {
+        let dir = root.join(&name);
         let actual = outline_tree_fixture(&dir);
         let expected = fs::read(dir.join("expected.txt"))
             .unwrap_or_else(|e| panic!("read expected.txt in {}: {e}", dir.display()));
-        assert_bytes_eq(name, &expected, actual.as_bytes());
+        assert_bytes_eq(&name, &expected, actual.as_bytes());
     }
 }
 

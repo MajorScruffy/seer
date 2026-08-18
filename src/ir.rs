@@ -12,6 +12,18 @@ pub enum FnKind {
     Method,
 }
 
+/// Indexed `function_item` or `function_signature_item`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnDef {
+    pub id: FnId,
+    pub name: String,
+    pub kind: FnKind,
+    pub module: Vec<String>,
+    pub nested: bool,
+    pub has_body: bool,
+    pub body: Vec<RawNode>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outline {
     pub roots: Vec<OutlineNode>,

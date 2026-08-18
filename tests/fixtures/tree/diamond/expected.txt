@@ -1,0 +1,7 @@
+fn a
+  b()
+    d()
+      return
+  c()
+    d()
+      return

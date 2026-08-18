@@ -1,0 +1,3 @@
+fn walk
+  if node.has_child()
+    walk(node.child()) [recursive]

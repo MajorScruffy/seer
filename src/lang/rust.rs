@@ -4,6 +4,7 @@ use crate::collapse::collapse_node;
 use crate::ir::{CallKind, FnKind};
 
 pub const FUNCTION_ITEM: &str = "function_item";
+pub const FUNCTION_SIGNATURE_ITEM: &str = "function_signature_item";
 pub const IF_EXPRESSION: &str = "if_expression";
 pub const FOR_EXPRESSION: &str = "for_expression";
 pub const WHILE_EXPRESSION: &str = "while_expression";

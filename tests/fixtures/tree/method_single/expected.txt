@@ -1,0 +1,4 @@
+fn process
+  if item.ok()
+    item.valid()
+      return true
