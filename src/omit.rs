@@ -56,6 +56,15 @@ pub fn should_omit(site: &CallSite, uses: &UseMap) -> bool {
     should_omit_resolved(site, uses, false)
 }
 
+/// Extract may drop builtin print/dbg macros only. `log`/`tracing` function
+/// calls stay in the raw body so expand can apply omit step 1.
+pub fn should_omit_at_extract(site: &CallSite, uses: &UseMap) -> bool {
+    if !site.is_macro {
+        return false;
+    }
+    should_omit(site, uses)
+}
+
 /// Full omit list: a local expand target is never omitted.
 pub fn should_omit_resolved(site: &CallSite, uses: &UseMap, has_local_target: bool) -> bool {
     if has_local_target {
@@ -240,7 +249,12 @@ fn f() {
     return;
 }
 "#;
-        assert_eq!(outline_of(src, "f"), "fn f\n  return\n");
+        // Function-form `log::warn` stays in the raw body; expand omits it
+        // after resolve (no local target). Builtin and log/tracing macros drop here.
+        assert_eq!(
+            outline_of(src, "f"),
+            "fn f\n  log::warn(\"empty\")\n  return\n"
+        );
     }
 
     #[test]
@@ -280,6 +294,33 @@ fn f() {
 }
 "#;
         assert_eq!(outline_of(src, "f"), "fn f\n  info()\n");
+    }
+
+    #[test]
+    fn omit_keeps_local_log_module() {
+        let files = [
+            (
+                "main.rs".into(),
+                "fn main() {\n    log::init();\n}\n".into(),
+            ),
+            ("log.rs".into(), "fn init() {\n    return;\n}\n".into()),
+        ];
+        assert_eq!(
+            crate::outline_files(&files),
+            "fn main\n  log::init()\n    return\n"
+        );
+
+        let files = [
+            (
+                "lib.rs".into(),
+                "use log::init;\nfn main() {\n    init();\n}\n".into(),
+            ),
+            ("log.rs".into(), "fn init() {\n    return;\n}\n".into()),
+        ];
+        assert_eq!(
+            crate::outline_files(&files),
+            "fn main\n  init()\n    return\n"
+        );
     }
 
     #[test]

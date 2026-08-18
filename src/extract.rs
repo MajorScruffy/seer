@@ -6,7 +6,7 @@ use crate::lang::rust::{
     self, call_kind, classify_function_item, first_named_child, first_named_child_kind, fn_name,
     header_for, header_if, header_loop, header_match, header_while, path_segments,
 };
-use crate::omit::{should_omit, UseMap};
+use crate::omit::{should_omit_at_extract, UseMap};
 use crate::print;
 
 struct Ctx<'a> {
@@ -348,7 +348,7 @@ fn emit_call(node: Node, ctx: &Ctx, is_macro: bool) -> Vec<RawNode> {
         is_macro,
         file: ctx.file.to_string(),
     };
-    if should_omit(&site, ctx.uses) {
+    if should_omit_at_extract(&site, ctx.uses) {
         Vec::new()
     } else {
         vec![RawNode::Call { site }]
