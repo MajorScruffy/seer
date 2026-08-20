@@ -46,7 +46,7 @@ Pain of alternatives: rust-analyzer needs a working sysroot and is slow on histo
 
 ### Goals
 
-1. Parse Rust with tree-sitter and emit the outline format defined here.
+1. Parse Rust, Java, and TypeScript with tree-sitter and emit the outline format defined here.
 2. Expand a call iff its definition is uniquely found by the v1 resolve rules in the analyzed set.
 3. Omit only the logging/debug APIs in [Omit list](#omit-list-v1).
 4. Diff two outlines with the unified-diff algorithm defined here.
@@ -55,7 +55,7 @@ Pain of alternatives: rust-analyzer needs a working sysroot and is slow on histo
 
 ### Non-Goals (v1)
 
-- JS/TS, C#, or any language other than Rust.
+- JavaScript (`.js`), C#, or any language other than Rust, Java, and TypeScript.
 - rust-analyzer, rustc, cargo check, macro expansion, or cfg evaluation.
 - Type-aware method resolution, trait selection, or autoderef.
 - `--format`, JSON, HTML, box-drawing, color.
@@ -71,9 +71,9 @@ Pain of alternatives: rust-analyzer needs a working sysroot and is slow on histo
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Parser | tree-sitter + `tree-sitter-rust` | Works on blobs and broken files; no compile. Already decided. |
+| Parser | tree-sitter + rust/java/typescript grammars | Works on blobs and broken files; no compile. Already decided. |
 | Resolve | Name + `use` paths, not rust-analyzer | Fast, deterministic, works without a project. Under-expand rather than guess. |
-| First language | Rust only | Grammar mapping and omit list fully specified. JS/TS/C# are follow-on. |
+| First language | Rust, then Java + TypeScript | Same outline shape. Per-language extract, omit, and import maps. C# / JS still follow-on. |
 | Outline shape | Indentation-only, 2 spaces, no box-drawing | Line-oriented diff input. Normative example is law. |
 | External calls | Show as leaves, do not expand | Reviewers still see I/O and serde; no need for crate sources. |
 | Local calls | Expand in place under the call snippet | The outline is interprocedural from entry functions. |
@@ -178,6 +178,8 @@ repository = "https://github.com/MajorScruffy/seer"
 clap = { version = "4", features = ["derive"] }
 tree-sitter = "0.25"       # 0.25.x as of 2026-08; 0.25.10 known good with rust 0.24.2
 tree-sitter-rust = "0.24"  # 0.24.x as of 2026-08; 0.24.2 known good
+tree-sitter-java = "0.23"
+tree-sitter-typescript = "0.23"
 
 [dev-dependencies]
 tempfile = "3"
@@ -205,19 +207,19 @@ edition = "2021"
 | Invocation | Analyzed set |
 |---|---|
 | `seer tree FILE.rs` or `seer FILE.rs` | That file only |
-| `seer tree DIR` or `seer DIR` | All collected `.rs` files under `DIR` |
+| `seer tree DIR` or `seer DIR` | All collected source files under `DIR` |
 | `seer -`, `seer tree -`, or `seer tree` with stdin piped | One virtual file named `<stdin>` |
-| `seer diff` / `seer` (git modes) | Per side: all collected `.rs` files in that revision or worktree |
+| `seer diff` / `seer` (git modes) | Per side: all collected source files in that revision or worktree |
 
 **Collect rules** (`src/collect.rs`):
 
-- Include regular files whose name ends with `.rs` (case-sensitive).
+- Include regular files whose name ends with `.rs`, `.java`, `.ts`, `.tsx`, `.mts`, or `.cts` (case-sensitive). `.js` is not collected.
 - Exclude a file if any path component is `target`, `.git`, or `node_modules`.
 - Exclude a file if any path component starts with `.` (dot dirs/files).
 - Follow only directories that pass the same component filters. Do not follow symlinks (`std::fs::read_dir` entries where `file_type()?.is_symlink()` → skip).
 - Sort included paths by relative POSIX path (`/` separators, no `./` prefix) using UTF-8 byte order (`str` comparison).
 - **Relative root / `FnId.file` (normative, pick is law):**
-  - `outline_files`: the path string passed in each pair. The golden harness uses `input.rs` or paths relative to `input/` (`a.rs`, `lib.rs`, …).
+  - `outline_files`: the path string passed in each pair. The golden harness uses `input.rs` / `input.java` / `input.ts` or paths relative to `input/`.
   - CLI single file: the path **as given on argv**, with only `\` → `/` on Windows. Not canonicalized, not made absolute, not reduced to a basename. `seer tests/fixtures/tree/empty_file/input.rs` → `FnId.file = "tests/fixtures/tree/empty_file/input.rs"`.
   - CLI directory: POSIX path relative to the directory argument.
   - stdin (`-`): `<stdin>`.
@@ -228,7 +230,7 @@ edition = "2021"
 ### Parse
 
 - Encoding: source must be valid UTF-8. Invalid UTF-8 → `SeerError::Io` / exit 3, stderr `error: invalid utf-8: <path>`.
-- Parser: `tree_sitter_rust::LANGUAGE` (or the equivalent `language()` API of the pinned crate).
+- Parser: by path extension. `.rs` → `tree_sitter_rust::LANGUAGE`. `.java` → `tree_sitter_java::LANGUAGE`. `.ts`/`.mts`/`.cts` → `tree_sitter_typescript::LANGUAGE_TYPESCRIPT`. `.tsx` → `LANGUAGE_TSX`. `<stdin>` is Rust.
 - Tree-sitter is error-tolerant. **Do not fail the process** because the CST contains `ERROR` nodes. Skip `ERROR` nodes and continue.
 - Do not run rustc. Do not expand macros. Do not evaluate `#[cfg]`. Every `function_item` is visible.
 
@@ -443,11 +445,13 @@ Calls do not include a trailing `;` (the semicolon is on `expression_statement`,
 
 ### Omit list (v1)
 
-Home of the omit list: **this table**. Do not fork copies. v1 implements **Rust only**. JS/TS and C# names live only under [Follow-on languages](#follow-on-languages-non-blocking-sketch); do not encode them in v1.
+Home of the omit list: **this table**. Do not fork copies.
 
 | Language | Drop these |
 |---|---|
 | Rust | `println!` `eprintln!` `print!` `eprint!` `dbg!` · `log::*` · `tracing::*` |
+| TypeScript | `console.log/debug/info/warn/error/trace/dir` · `debugger` |
+| Java | `System.out.print*` · `System.err.print*` · `log.`/`logger.`/`Logger.` + `{info,debug,warn,error,trace,log,fine,finer,finest}` |
 
 #### Rust matching algorithm
 
@@ -469,7 +473,11 @@ Inputs: the `CallSite` plus the resolve result (local `FnId` or not).
 
 Do **not** omit `clone`, `unwrap`, `to_string`, `drop`, `format!`, `vec!`, `todo!`, `assert!`, `assert_eq!`, `debug_assert!`, `panic!`, `unimplemented!`, `unreachable!`.
 
-**Check:** `tests/fixtures/tree/omit_logging` and `tests/fixtures/tree/macros_stay`.
+**Check:** `tests/fixtures/tree/omit_logging` and `tests/fixtures/tree/macros_stay`. Java: `java_omit_logging`. TypeScript: `ts_omit_console`. `java_process_handle` / `ts_process_handle` lock the process/handle shape.
+
+#### TypeScript / Java omit (display-based)
+
+After the local-target rule: drop `console.{log,debug,info,warn,error,trace,dir}(…)` and `debugger`. Drop `System.out.print*` / `System.err.print*`. Drop `log.` / `logger.` / `LOG.` / `Logger.` method calls whose name is in `{info,debug,warn,error,trace,log,fine,finer,finest}`. A local `info()` is kept.
 
 ### Use map
 
@@ -742,9 +750,9 @@ v1 flags: **none** besides clap’s `--help` / `--version`. Do not add `--format
 
 ### PATH behavior
 
-- Existing `.rs` file: analyzed set = that file. Language = Rust.
-- Existing non-`.rs` file: exit 3, `error: unsupported language: <ext or "unknown"> (v1 supports rust only)`.
-- Existing directory: collect `.rs` as specified. Non-`.rs` children are skipped silently. If zero files collected: empty outline, exit 0.
+- Existing source file (`.rs` / `.java` / `.ts` / `.tsx` / `.mts` / `.cts`): analyzed set = that file. Language from the extension.
+- Existing non-source file: exit 3, `error: unsupported language: <ext or "unknown"> (v1 supports rust, java, and typescript)`.
+- Existing directory: collect source files as specified. Other children are skipped silently. If zero files collected: empty outline, exit 0.
 - Missing path: exit 3, `error: path not found: <path>`.
 - `-`: stdin, language Rust, path `<stdin>`.
 
@@ -1004,18 +1012,16 @@ PRs merge in the order in [PR Plan](#pr-plan). Each PR is independently releasab
 
 ## Follow-on languages (non-blocking sketch)
 
-Not v1. Do not add crates or fixtures for these in the PRs below.
+Java and TypeScript are implemented (see omit table, collect extensions, goldens `java_*` / `ts_*`). Still not v1:
 
-- **Parse:** `tree-sitter-javascript`, `tree-sitter-typescript`, `tree-sitter-c-sharp` later.
-- **Omit (not v1; do not implement):**
+- **Parse:** `tree-sitter-javascript` (`.js`), `tree-sitter-c-sharp` later.
+- **Omit (not implemented):**
 
   | Language | Drop these |
   |---|---|
-  | JS/TS | `console.log/debug/info/warn/error/trace` · `debugger` |
   | C# | `Console.Write*` · `Debug.Write*` · `Trace.Write*` |
 
-- **Control:** JS `if`/`else`/`for`/`while`/`switch`/`try`/`catch`/`finally`/`return`/`break`/`continue`. C# analogous plus `foreach`.
-- **Resolve:** same conservative name rules; `import`/`using` instead of `use`.
+- **Resolve:** same conservative name rules; C# `using` instead of `use`.
 - **Expand overlay:** language servers later, expand only.
 
 ---
@@ -1042,8 +1048,8 @@ Agents must not judge “looks right.” A change is done when the commands in [
 
 - Discover each directory `tests/fixtures/tree/<name>/`. **PR 4a:** iterate only the whitelist `{empty_file, types_only, if_else_if_else, loops, two_entries}` (ignore any other dir). **PR 4b and later:** every directory, no whitelist.
 - Input:
-  - If `input.rs` exists: `outline_files(&[("<filename>", contents)])` where `<filename>` is `input.rs`.
-  - Else if `input/` exists: collect `*.rs` recursively (same sort/exclude as production), paths relative to `input/`, then `outline_files`.
+  - If `input.rs` / `input.java` / `input.ts` / `input.tsx` exists: `outline_files(&[("<filename>", contents)])`.
+  - Else if `input/` exists: collect source files recursively (same sort/exclude as production), paths relative to `input/`, then `outline_files`.
 - Read `expected.txt` as bytes.
 - Compare `actual.as_bytes() == expected.as_bytes()`.
 - On mismatch: fail the test and print a unified diff of expected vs actual with headers `expected` / `actual`. Do not write files.

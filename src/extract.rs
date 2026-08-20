@@ -6,6 +6,7 @@ use crate::lang::rust::{
     self, call_kind, classify_function_item, first_named_child, first_named_child_kind, fn_name,
     header_for, header_if, header_loop, header_match, header_while, path_segments,
 };
+use crate::lang::{language_for_path, Language};
 use crate::omit::{should_omit_at_extract, UseMap};
 use crate::print;
 
@@ -23,6 +24,15 @@ pub fn index_defs(
     uses: &UseMap,
     module: &[String],
 ) -> Vec<FnDef> {
+    match language_for_path(file) {
+        Some(Language::Java) => {
+            return crate::lang::java::index_defs(root, src, file, uses, module);
+        }
+        Some(Language::TypeScript) => {
+            return crate::lang::typescript::index_defs(root, src, file, uses, module);
+        }
+        _ => {}
+    }
     let mut out = Vec::new();
     walk_index(root, src, file, uses, module, false, &mut out);
     out
@@ -90,6 +100,13 @@ fn walk_index<'a>(
 
 /// Unexpanded body of one `function_item`. Does not emit a `fn` line for `fn_item` itself.
 pub fn extract_fn(fn_item: Node, src: &str, file: &str, uses: &UseMap) -> Vec<RawNode> {
+    match language_for_path(file) {
+        Some(Language::Java) => return crate::lang::java::extract_fn(fn_item, src, file, uses),
+        Some(Language::TypeScript) => {
+            return crate::lang::typescript::extract_fn(fn_item, src, file, uses);
+        }
+        _ => {}
+    }
     let ctx = Ctx { src, file, uses };
     fn_item
         .child_by_field_name("body")

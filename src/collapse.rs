@@ -34,7 +34,15 @@ pub fn collapse_node(node: tree_sitter::Node, src: &str) -> String {
     collapse(text, &ranges)
 }
 
-const LITERAL_KINDS: &[&str] = &["string_literal", "raw_string_literal", "char_literal"];
+const LITERAL_KINDS: &[&str] = &[
+    "string_literal",
+    "raw_string_literal",
+    "char_literal",
+    "character_literal",
+    "string",
+    "template_string",
+    "template_literal",
+];
 
 /// Half-open ranges relative to `node.start_byte()`.
 pub(crate) fn literal_ranges(node: tree_sitter::Node) -> Vec<(usize, usize)> {

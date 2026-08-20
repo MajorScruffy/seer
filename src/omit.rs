@@ -49,6 +49,30 @@ impl UseMap {
     pub fn binding(&self, name: &str) -> Option<&[String]> {
         self.bindings.get(name).map(Vec::as_slice)
     }
+
+    pub fn insert_binding(&mut self, name: String, path: Vec<String>) {
+        self.bindings.insert(name, path);
+    }
+
+    pub fn push_glob(&mut self, prefix: Vec<String>) {
+        self.globs.push(prefix);
+    }
+
+    pub fn for_file(root: Node, src: &str, file: &str) -> Self {
+        match crate::lang::language_for_path(file) {
+            Some(crate::lang::Language::Java) => {
+                let mut map = Self::default();
+                crate::lang::java::collect_imports(root, src, &mut map);
+                map
+            }
+            Some(crate::lang::Language::TypeScript) => {
+                let mut map = Self::default();
+                crate::lang::typescript::collect_imports(root, src, file, &mut map);
+                map
+            }
+            _ => Self::from_tree(root, src),
+        }
+    }
 }
 
 /// Syntactic omit (steps 2–3). Step 1 is `should_omit_resolved`.
@@ -56,9 +80,12 @@ pub fn should_omit(site: &CallSite, uses: &UseMap) -> bool {
     should_omit_resolved(site, uses, false)
 }
 
-/// Extract may drop builtin print/dbg macros only. `log`/`tracing` function
-/// calls stay in the raw body so expand can apply omit step 1.
+/// Extract drops builtin print/dbg macros and JS/Java logging calls.
+/// Rust `log::` / `tracing::` *function* calls stay so expand can apply step 1.
 pub fn should_omit_at_extract(site: &CallSite, uses: &UseMap) -> bool {
+    if is_js_java_logging(site) {
+        return true;
+    }
     if !site.is_macro {
         return false;
     }
@@ -73,7 +100,39 @@ pub fn should_omit_resolved(site: &CallSite, uses: &UseMap, has_local_target: bo
     should_omit_syntactic(site, uses)
 }
 
+const CONSOLE_METHODS: &[&str] = &["log", "debug", "info", "warn", "error", "trace", "dir"];
+const JAVA_LOG_METHODS: &[&str] = &[
+    "info", "debug", "warn", "error", "trace", "log", "fine", "finer", "finest",
+];
+
+fn is_js_java_logging(site: &CallSite) -> bool {
+    let d = site.display.as_str();
+    if CONSOLE_METHODS
+        .iter()
+        .any(|m| d.starts_with(&format!("console.{m}(")))
+    {
+        return true;
+    }
+    if d.contains("System.out.print") || d.contains("System.err.print") {
+        return true;
+    }
+    if let CallKind::Method { name } = &site.kind {
+        if JAVA_LOG_METHODS.contains(&name.as_str())
+            && (d.starts_with("log.")
+                || d.starts_with("logger.")
+                || d.starts_with("LOG.")
+                || d.starts_with("Logger."))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn should_omit_syntactic(site: &CallSite, uses: &UseMap) -> bool {
+    if is_js_java_logging(site) {
+        return true;
+    }
     let path = match &site.kind {
         CallKind::Free { path } => path.as_slice(),
         CallKind::Method { .. } => return false,

@@ -1,0 +1,10 @@
+fn process
+  if (items.length == 0)
+    return
+  for (Item item : items)
+    if (item.valid())
+      handle(item)
+        if (!item.ready())
+          return
+        JSON.toString(item)
+        Files.write(path, data)
