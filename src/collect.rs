@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
+use crate::lang::{is_source_filename, supported_languages_msg};
 use crate::SeerError;
 
 /// Collect sources for a CLI path argument. `-` is stdin (`<stdin>`), never a filesystem path.
@@ -18,7 +19,7 @@ pub fn collect_path(path_arg: &str) -> Result<Vec<(String, String)>, SeerError> 
         Err(e) => return Err(io_err(path, e)),
     };
     if meta.is_dir() {
-        collect_rs_files(path)
+        collect_source_files(path)
     } else if meta.is_file() {
         collect_one_file(path_arg, path)
     } else {
@@ -40,14 +41,15 @@ pub fn collect_stdin() -> Result<Vec<(String, String)>, SeerError> {
 
 fn collect_one_file(path_arg: &str, path: &Path) -> Result<Vec<(String, String)>, SeerError> {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !name.ends_with(".rs") {
+    if !is_source_filename(name) {
         let ext = path
             .extension()
             .and_then(|s| s.to_str())
             .filter(|s| !s.is_empty())
             .unwrap_or("unknown");
         return Err(SeerError::Io(format!(
-            "unsupported language: {ext} (v1 supports rust only)"
+            "unsupported language: {ext} ({})",
+            supported_languages_msg()
         )));
     }
     // CLI single-file FnId.file is the argv spelling; only `\` → `/`.
@@ -58,12 +60,17 @@ fn collect_one_file(path_arg: &str, path: &Path) -> Result<Vec<(String, String)>
     Ok(vec![(posix, src)])
 }
 
-/// Regular `.rs` files under `root` as `(posix_relpath, utf8_source)`, sorted.
-pub fn collect_rs_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
+/// Regular source files under `root` as `(posix_relpath, utf8_source)`, sorted.
+pub fn collect_source_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
     let mut files = Vec::new();
     walk(root, Path::new(""), &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(files)
+}
+
+/// Back-compat name used by git/fixtures.
+pub fn collect_rs_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
+    collect_source_files(root)
 }
 
 fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), SeerError> {
@@ -87,7 +94,7 @@ fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), S
         let child_abs = entry.path();
         if ft.is_dir() {
             walk(&child_abs, &child_rel, out)?;
-        } else if ft.is_file() && name.ends_with(".rs") {
+        } else if ft.is_file() && is_source_filename(name) {
             let posix = posix_rel(&child_rel);
             let bytes = fs::read(&child_abs).map_err(|e| io_err(&child_abs, e))?;
             let src = String::from_utf8(bytes)
@@ -142,16 +149,23 @@ mod tests {
         write(&root.join(".dot.rs"), "fn d() {}");
         write(&root.join("sub/.secret.rs"), "fn s() {}");
         write(&root.join("keep.txt"), "not rust");
+        write(&root.join("d.java"), "class D {}");
+        write(&root.join("e.ts"), "export {}");
+        write(&root.join("f.tsx"), "export {}");
+        write(&root.join("skip.js"), "1");
 
-        let files = collect_rs_files(root).unwrap();
+        let files = collect_source_files(root).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-        assert_eq!(paths, ["a.rs", "b.rs", "sub/c.rs"]);
+        assert_eq!(
+            paths,
+            ["a.rs", "b.rs", "d.java", "e.ts", "f.tsx", "sub/c.rs"]
+        );
     }
 
     #[test]
     fn empty_dir_is_empty() {
         let dir = tmp_tree();
-        assert!(collect_rs_files(dir.path()).unwrap().is_empty());
+        assert!(collect_source_files(dir.path()).unwrap().is_empty());
     }
 
     #[test]
@@ -160,7 +174,7 @@ mod tests {
         let path = dir.path().join("bad.rs");
         let mut f = fs::File::create(&path).unwrap();
         f.write_all(&[0xff, 0xfe]).unwrap();
-        match collect_rs_files(dir.path()) {
+        match collect_source_files(dir.path()) {
             Err(SeerError::Io(msg)) => assert_eq!(msg, "invalid utf-8: bad.rs"),
             other => panic!("expected invalid utf-8, got {other:?}"),
         }
@@ -193,7 +207,10 @@ mod tests {
         write(&file, "1\n");
         match collect_path(file.to_str().unwrap()) {
             Err(SeerError::Io(msg)) => {
-                assert_eq!(msg, "unsupported language: js (v1 supports rust only)");
+                assert_eq!(
+                    msg,
+                    "unsupported language: js (v1 supports rust, java, and typescript)"
+                );
             }
             other => panic!("expected unsupported, got {other:?}"),
         }
@@ -206,7 +223,10 @@ mod tests {
         write(&file, "1\n");
         match collect_path(file.to_str().unwrap()) {
             Err(SeerError::Io(msg)) => {
-                assert_eq!(msg, "unsupported language: unknown (v1 supports rust only)");
+                assert_eq!(
+                    msg,
+                    "unsupported language: unknown (v1 supports rust, java, and typescript)"
+                );
             }
             other => panic!("expected unknown, got {other:?}"),
         }
@@ -224,7 +244,7 @@ mod tests {
         symlink(root.join("real.rs"), root.join("link.rs")).unwrap();
         symlink(root.join("other"), root.join("linkdir")).unwrap();
 
-        let files = collect_rs_files(root).unwrap();
+        let files = collect_source_files(root).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(paths, ["other/x.rs", "real.rs"]);
     }

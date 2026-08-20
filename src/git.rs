@@ -109,7 +109,7 @@ fn keep_rs_path(posix: &str) -> bool {
         }
         last = comp;
     }
-    last.ends_with(".rs")
+    crate::lang::is_source_filename(last)
 }
 
 fn git_output(dir: &Path, args: &[&str]) -> Result<std::process::Output, SeerError> {

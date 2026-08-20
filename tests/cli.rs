@@ -114,6 +114,30 @@ fn cli_tree_empty_dir() {
 }
 
 #[test]
+fn cli_tree_java() {
+    let out = run(&["tree", "tests/fixtures/tree/java_process_handle/input.java"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected("java_process_handle"));
+}
+
+#[test]
+fn cli_tree_typescript() {
+    let out = run(&["tree", "tests/fixtures/tree/ts_process_handle/input.ts"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.stdout, expected("ts_process_handle"));
+}
+
+#[test]
 fn cli_tree_unsupported() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("x.js");

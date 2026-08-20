@@ -67,18 +67,24 @@ fn diff_goldens() {
 }
 
 fn outline_tree_fixture(dir: &Path) -> String {
-    let input_rs = dir.join("input.rs");
     let input_dir = dir.join("input");
-    if input_rs.is_file() {
-        let contents = fs::read_to_string(&input_rs)
-            .unwrap_or_else(|e| panic!("read {}: {e}", input_rs.display()));
-        outline_files(&[("input.rs".to_string(), contents)])
-    } else if input_dir.is_dir() {
+    for name in ["input.rs", "input.java", "input.ts", "input.tsx"] {
+        let path = dir.join(name);
+        if path.is_file() {
+            let contents = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            return outline_files(&[(name.to_string(), contents)]);
+        }
+    }
+    if input_dir.is_dir() {
         let files = collect_rs_files(&input_dir)
             .unwrap_or_else(|e| panic!("collect {}: {e}", input_dir.display()));
         outline_files(&files)
     } else {
-        panic!("fixture {} has neither input.rs nor input/", dir.display());
+        panic!(
+            "fixture {} has neither input.rs/java/ts/tsx nor input/",
+            dir.display()
+        );
     }
 }
 

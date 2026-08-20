@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::extract::index_defs;
 use crate::ir::{CallKind, CallSite, FnDef, FnId, FnKind};
+use crate::lang::{language_for_path, Language};
 use crate::omit::UseMap;
-use crate::parse::parse_rust;
+use crate::parse::parse_path;
 
 const LANG_EXTERN: &[&str] = &["std", "core", "alloc", "proc_macro", "test"];
 
@@ -29,6 +30,20 @@ impl ResolveIndex {
 
 /// `rel` is per-path: drop a leading `src/` on that path only.
 pub fn module_path(file: &str) -> Vec<String> {
+    match language_for_path(file) {
+        Some(Language::TypeScript) => crate::lang::typescript::module_path(file),
+        Some(Language::Java) => {
+            let stem = std::path::Path::new(file)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Foo");
+            vec![stem.to_string()]
+        }
+        _ => rust_module_path(file),
+    }
+}
+
+fn rust_module_path(file: &str) -> Vec<String> {
     if file == "<stdin>" {
         return Vec::new();
     }
@@ -52,9 +67,15 @@ pub fn index_files(files: &[(String, String)]) -> ResolveIndex {
     let mut defs = Vec::new();
 
     for (path, src) in files {
-        let tree = parse_rust(src);
-        let uses = UseMap::from_tree(tree.root_node(), src);
-        let module = module_path(path);
+        let tree = parse_path(path, src);
+        let uses = UseMap::for_file(tree.root_node(), src, path);
+        let module = match language_for_path(path) {
+            Some(Language::Java) => {
+                crate::lang::java::module_path_from_tree(tree.root_node(), path, src)
+            }
+            Some(Language::TypeScript) => crate::lang::typescript::module_path(path),
+            _ => rust_module_path(path),
+        };
         modules.insert(module.clone());
         uses_map.insert(path.clone(), uses.clone());
         file_module.insert(path.clone(), module.clone());
@@ -114,12 +135,14 @@ fn resolve_qualified(path: &[String], file: &str, index: &ResolveIndex) -> Optio
     if !index.modules.contains(&mod_path) {
         return None;
     }
-    unique_free(index, |d| d.module == mod_path && d.name == *name)
+    unique_callable(index, file, |d| d.module == mod_path && d.name == *name)
 }
 
 fn resolve_unqualified(name: &str, file: &str, index: &ResolveIndex) -> Option<FnId> {
-    let same_file: Vec<&FnDef> = free_defs(index)
-        .filter(|d| d.id.file == file && d.name == name)
+    let same_file: Vec<&FnDef> = index
+        .defs
+        .iter()
+        .filter(|d| d.id.file == file && d.name == name && d.has_body)
         .collect();
     match same_file.as_slice() {
         [one] => return Some(one.id.clone()),
@@ -153,7 +176,7 @@ fn resolve_unqualified(name: &str, file: &str, index: &ResolveIndex) -> Option<F
     }
 
     let cur_mod = index.module_of(file);
-    unique_free(index, |d| {
+    unique_callable(index, file, |d| {
         d.module == cur_mod && d.id.file != file && d.name == name
     })
 }
@@ -221,6 +244,27 @@ fn unique_free(index: &ResolveIndex, pred: impl Fn(&FnDef) -> bool) -> Option<Fn
     match hits.as_slice() {
         [one] => Some(one.id.clone()),
         _ => None,
+    }
+}
+
+fn unique_callable(
+    index: &ResolveIndex,
+    file: &str,
+    pred: impl Fn(&FnDef) -> bool,
+) -> Option<FnId> {
+    match language_for_path(file) {
+        Some(Language::Java) | Some(Language::TypeScript) => {
+            let hits: Vec<&FnDef> = index
+                .defs
+                .iter()
+                .filter(|d| d.has_body && pred(d))
+                .collect();
+            match hits.as_slice() {
+                [one] => Some(one.id.clone()),
+                _ => None,
+            }
+        }
+        _ => unique_free(index, pred),
     }
 }
 

@@ -1,0 +1,6 @@
+fn App
+  if (ok)
+    return <div>{foo()}</div>
+
+fn foo
+  return
