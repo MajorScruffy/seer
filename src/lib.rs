@@ -1,25 +1,19 @@
 mod cli;
+mod collapse;
+mod collect;
+mod diff;
 mod error;
+mod extract;
 mod git;
+mod ir;
+mod lang;
+mod omit;
+mod parse;
+mod resolve;
 
-pub mod collapse;
-pub mod collect;
-pub mod diff;
-pub mod entry;
-pub mod expand;
-pub mod extract;
-pub mod ir;
-pub mod lang;
-pub mod omit;
-pub mod parse;
-pub mod print;
-pub mod resolve;
-
-pub use collapse::{collapse, collapse_node, strip_std};
+pub use collect::collect_source_files;
 pub use diff::diff_text;
 pub use error::SeerError;
-pub use ir::{CallKind, CallSite, FnDef, FnId, FnKind, Outline, OutlineNode, RawNode};
-pub use print::print;
 
 /// Successful CLI result. `exit` is 0 or 1.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,19 +35,30 @@ pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, S
 /// Does **not** read the disk and does **not** take Cargo.toml bytes (v1).
 pub fn outline_files(files: &[(String, String)]) -> String {
     let index = resolve::index_files(files);
-    let called = entry::called_targets(&index);
-    let entries = entry::select_entries(&index, &called);
+    let called = resolve::called_targets(&index);
+    let entries = resolve::select_entries(&index, &called);
     let mut roots = Vec::new();
     for id in entries {
         let def = index.def(&id).expect("entry is indexed");
         let mut stack = Vec::new();
-        let children = expand::expand_fn(def, &mut stack, &index);
+        let children = resolve::expand_fn(def, &mut stack, &index);
         roots.push(ir::OutlineNode {
             text: format!("fn {}", def.name),
             children,
         });
     }
-    print::print(&ir::Outline { roots })
+    ir::print(&ir::Outline { roots })
+}
+
+/// Diff two analyzed sets as call stacks into changed functions.
+pub fn outline_diff(
+    left: &[(String, String)],
+    right: &[(String, String)],
+    name_a: &str,
+    name_b: &str,
+) -> String {
+    let (a, b) = resolve::flow_diff(&resolve::index_files(left), &resolve::index_files(right));
+    diff_text(&a, &b, name_a, name_b)
 }
 
 #[cfg(test)]
@@ -103,5 +108,49 @@ mod tests {
     #[test]
     fn diff_identical_empty() {
         assert_eq!(diff_text("fn a\n", "fn a\n", "a", "b"), "");
+    }
+
+    #[test]
+    fn outline_diff_helper_shows_stack() {
+        let left = [(
+            "a.rs".into(),
+            "fn process() { handle(); }\nfn handle() { return; }\n".into(),
+        )];
+        let right = [(
+            "a.rs".into(),
+            "fn process() { handle(); }\nfn handle() { if true { return; } }\n".into(),
+        )];
+        assert_eq!(
+            outline_diff(&left, &right, "a", "b"),
+            "\
+--- a
++++ b
+@@ -1,3 +1,4 @@
+ process > handle
+ fn handle
+-  return
++  if true
++    return
+"
+        );
+    }
+
+    #[test]
+    fn outline_diff_new_fn_only() {
+        let left = [("a.rs".into(), "fn main() { return; }\n".into())];
+        let right = [(
+            "a.rs".into(),
+            "fn main() { return; }\nfn extra() { return; }\n".into(),
+        )];
+        assert_eq!(
+            outline_diff(&left, &right, "HEAD", "WORKTREE"),
+            "\
+--- HEAD
++++ WORKTREE
+@@ -0,0 +1,2 @@
++fn extra
++  return
+"
+        );
     }
 }

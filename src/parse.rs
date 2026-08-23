@@ -45,6 +45,7 @@ pub fn parse_tsx(src: &str) -> tree_sitter::Tree {
 }
 
 /// Depth-first search for the first node of `kind`.
+#[cfg(test)]
 pub fn find_kind<'a>(node: tree_sitter::Node<'a>, kind: &str) -> Option<tree_sitter::Node<'a>> {
     if node.kind() == kind {
         return Some(node);

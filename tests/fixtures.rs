@@ -1,8 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use seer::collect::collect_rs_files;
-use seer::{diff_text, outline_files};
+use seer::{collect_source_files, diff_text, outline_files};
 
 #[test]
 fn tree_goldens() {
@@ -77,7 +76,7 @@ fn outline_tree_fixture(dir: &Path) -> String {
         }
     }
     if input_dir.is_dir() {
-        let files = collect_rs_files(&input_dir)
+        let files = collect_source_files(&input_dir)
             .unwrap_or_else(|e| panic!("collect {}: {e}", input_dir.display()));
         outline_files(&files)
     } else {

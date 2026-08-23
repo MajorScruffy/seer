@@ -8,7 +8,6 @@ description = "Control-and-call outlines of source code"
 repository = "https://github.com/MajorScruffy/seer"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 tree-sitter = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-rust = "0.24"

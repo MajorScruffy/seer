@@ -1,14 +1,13 @@
 use tree_sitter::Node;
 
 use crate::collapse::{collapse_node, strip_std};
-use crate::ir::{CallSite, FnDef, FnId, Outline, OutlineNode, RawNode};
+use crate::ir::{CallSite, FnDef, FnId, RawNode};
 use crate::lang::rust::{
-    self, call_kind, classify_function_item, first_named_child, first_named_child_kind, fn_name,
-    header_for, header_if, header_loop, header_match, header_while, path_segments,
+    self, call_kind, classify_function_item, fn_name, header_for, header_if, header_loop,
+    header_match, header_while, path_segments,
 };
-use crate::lang::{language_for_path, Language};
+use crate::lang::{first_named_child_kind, language_for_path, Language};
 use crate::omit::{should_omit_at_extract, UseMap};
-use crate::print;
 
 struct Ctx<'a> {
     src: &'a str,
@@ -114,34 +113,9 @@ pub fn extract_fn(fn_item: Node, src: &str, file: &str, uses: &UseMap) -> Vec<Ra
         .unwrap_or_default()
 }
 
-/// Non-nested body-bearing `function_item`s (not trait signatures), source order.
-pub fn root_function_items<'a>(root: Node<'a>) -> Vec<Node<'a>> {
-    let mut out = Vec::new();
-    walk_root_fns(root, false, &mut out);
-    out
-}
-
-fn walk_root_fns<'a>(node: Node<'a>, in_fn: bool, out: &mut Vec<Node<'a>>) {
-    if node.kind() == rust::FUNCTION_ITEM {
-        if !in_fn && node.child_by_field_name("body").is_some() {
-            out.push(node);
-        }
-        for i in 0..node.named_child_count() {
-            if let Some(child) = node.named_child(i) {
-                walk_root_fns(child, true, out);
-            }
-        }
-        return;
-    }
-    for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i) {
-            walk_root_fns(child, in_fn, out);
-        }
-    }
-}
-
 /// First `function_item` whose name field equals `name`.
-pub fn find_function_item<'a>(node: Node<'a>, src: &str, name: &str) -> Option<Node<'a>> {
+#[cfg(test)]
+pub(crate) fn find_function_item<'a>(node: Node<'a>, src: &str, name: &str) -> Option<Node<'a>> {
     if node.kind() == rust::FUNCTION_ITEM && fn_name(node, src) == name {
         return Some(node);
     }
@@ -156,8 +130,10 @@ pub fn find_function_item<'a>(node: Node<'a>, src: &str, name: &str) -> Option<N
 }
 
 /// Print one function’s raw tree as an Outline (calls as leaves).
-pub fn print_raw_fn(name: &str, body: &[RawNode]) -> String {
-    print::print(&Outline {
+#[cfg(test)]
+pub(crate) fn print_raw_fn(name: &str, body: &[RawNode]) -> String {
+    use crate::ir::{print, Outline, OutlineNode};
+    print(&Outline {
         roots: vec![OutlineNode {
             text: format!("fn {name}"),
             children: raw_to_outline(body),
@@ -165,7 +141,9 @@ pub fn print_raw_fn(name: &str, body: &[RawNode]) -> String {
     })
 }
 
-fn raw_to_outline(nodes: &[RawNode]) -> Vec<OutlineNode> {
+#[cfg(test)]
+fn raw_to_outline(nodes: &[RawNode]) -> Vec<crate::ir::OutlineNode> {
+    use crate::ir::OutlineNode;
     nodes
         .iter()
         .map(|n| match n {
@@ -225,7 +203,8 @@ fn walk(node: Node, ctx: &Ctx) -> Vec<RawNode> {
             out.extend(walk_field(node, "alternative", ctx));
             out
         }
-        rust::EXPRESSION_STATEMENT => first_named_child(node)
+        rust::EXPRESSION_STATEMENT => node
+            .named_child(0)
             .map(|e| walk(e, ctx))
             .unwrap_or_default(),
         "block" | "unsafe_block" | "async_block" | "const_block" | "gen_block" => {
@@ -572,25 +551,6 @@ fn f
     bar()
 "
         );
-    }
-
-    #[test]
-    fn root_function_items_skips_nested_and_signatures() {
-        let src = r#"
-trait T { fn sig(&self); }
-fn outer() {
-    fn inner() {}
-}
-impl X {
-    fn method() {}
-}
-"#;
-        let tree = parse_rust(src);
-        let names: Vec<String> = root_function_items(tree.root_node())
-            .into_iter()
-            .map(|n| fn_name(n, src))
-            .collect();
-        assert_eq!(names, vec!["outer", "method"]);
     }
 
     #[test]

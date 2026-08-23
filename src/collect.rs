@@ -68,11 +68,6 @@ pub fn collect_source_files(root: &Path) -> Result<Vec<(String, String)>, SeerEr
     Ok(files)
 }
 
-/// Back-compat name used by git/fixtures.
-pub fn collect_rs_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
-    collect_source_files(root)
-}
-
 fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), SeerError> {
     let entries = fs::read_dir(abs).map_err(|e| io_err(abs, e))?;
     for entry in entries {
@@ -105,7 +100,7 @@ fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), S
     Ok(())
 }
 
-fn excluded_component(name: &str) -> bool {
+pub(crate) fn excluded_component(name: &str) -> bool {
     name == "target" || name == ".git" || name == "node_modules" || name.starts_with('.')
 }
 

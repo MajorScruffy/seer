@@ -2,6 +2,7 @@ use tree_sitter::Node;
 
 use crate::collapse::collapse_node;
 use crate::ir::{CallKind, FnKind};
+use crate::lang::node_text;
 
 pub const FUNCTION_ITEM: &str = "function_item";
 pub const FUNCTION_SIGNATURE_ITEM: &str = "function_signature_item";
@@ -31,26 +32,6 @@ pub const IMPL_ITEM: &str = "impl_item";
 pub const TRAIT_ITEM: &str = "trait_item";
 pub const SOURCE_FILE: &str = "source_file";
 pub const MOD_ITEM: &str = "mod_item";
-
-pub fn node_text<'a>(node: Node, src: &'a str) -> &'a str {
-    node.utf8_text(src.as_bytes()).unwrap_or("")
-}
-
-pub fn first_named_child(node: Node) -> Option<Node> {
-    node.named_child(0)
-}
-
-/// First named child whose kind is one of `kinds` (skips extras such as comments).
-pub fn first_named_child_kind<'a>(node: Node<'a>, kinds: &[&str]) -> Option<Node<'a>> {
-    for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i) {
-            if kinds.iter().any(|k| child.kind() == *k) {
-                return Some(child);
-            }
-        }
-    }
-    None
-}
 
 pub fn fn_name(node: Node, src: &str) -> String {
     node.child_by_field_name("name")

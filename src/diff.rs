@@ -11,46 +11,12 @@ pub fn diff_text(a: &str, b: &str, name_a: &str, name_b: &str) -> String {
     unified_diff(&split_keepends(a), &split_keepends(b), name_a, name_b)
 }
 
-/// Python `str.splitlines` breaks, including `\r\n` as one terminator.
-fn is_splitlines_eol(c: char) -> bool {
-    matches!(
-        c,
-        '\n' | '\r'
-            | '\u{0B}'
-            | '\u{0C}'
-            | '\u{1C}'
-            | '\u{1D}'
-            | '\u{1E}'
-            | '\u{85}'
-            | '\u{2028}'
-            | '\u{2029}'
-    )
-}
-
-/// Same as Python `str.splitlines(keepends=True)`: `\r\n` stays one line.
 fn split_keepends(s: &str) -> Vec<&str> {
     if s.is_empty() {
-        return Vec::new();
+        Vec::new()
+    } else {
+        s.split_inclusive('\n').collect()
     }
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut chars = s.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        let end = if c == '\r' && chars.peek().is_some_and(|(_, n)| *n == '\n') {
-            chars.next();
-            i + 2
-        } else if is_splitlines_eol(c) {
-            i + c.len_utf8()
-        } else {
-            continue;
-        };
-        lines.push(&s[start..end]);
-        start = end;
-    }
-    if start < s.len() {
-        lines.push(&s[start..]);
-    }
-    lines
 }
 
 fn unified_diff(a: &[&str], b: &[&str], name_a: &str, name_b: &str) -> String {
@@ -228,7 +194,7 @@ fn matching_blocks(a: &[&str], b: &[&str]) -> Vec<(usize, usize, usize)> {
     let mut queue = vec![(0usize, la, 0usize, lb)];
     let mut matching = Vec::new();
     while let Some((alo, ahi, blo, bhi)) = queue.pop() {
-        let (i, j, k) = find_longest_match(a, b, &b2j, alo, ahi, blo, bhi);
+        let (i, j, k) = find_longest_match(a, &b2j, alo, ahi, blo, bhi);
         if k > 0 {
             matching.push((i, j, k));
             if alo < i && blo < j {
@@ -269,19 +235,11 @@ fn chain_b<'a>(b: &[&'a str]) -> HashMap<&'a str, Vec<usize>> {
     for (i, elt) in b.iter().enumerate() {
         b2j.entry(*elt).or_default().push(i);
     }
-    let n = b.len();
-    // difflib autojunk: drop elements that appear more than 1% of the time
-    // once the sequence is long enough.
-    if n >= 200 {
-        let ntest = n / 100 + 1;
-        b2j.retain(|_, idxs| idxs.len() <= ntest);
-    }
     b2j
 }
 
 fn find_longest_match(
     a: &[&str],
-    b: &[&str],
     b2j: &HashMap<&str, Vec<usize>>,
     alo: usize,
     ahi: usize,
@@ -313,19 +271,6 @@ fn find_longest_match(
         }
         j2len = newj2len;
     }
-
-    // Extend over popular (autojunk-purged) equal lines on either side.
-    while besti > alo && bestj > blo && a[besti - 1] == b[bestj - 1] {
-        besti -= 1;
-        bestj -= 1;
-        bestsize += 1;
-    }
-    while besti + bestsize < ahi
-        && bestj + bestsize < bhi
-        && a[besti + bestsize] == b[bestj + bestsize]
-    {
-        bestsize += 1;
-    }
     (besti, bestj, bestsize)
 }
 
@@ -337,41 +282,5 @@ mod tests {
     fn empty_to_content_hunk_is_zero_zero() {
         let d = diff_text("", "fn f\n  return\n", "a", "b");
         assert_eq!(d, "--- a\n+++ b\n@@ -0,0 +1,2 @@\n+fn f\n+  return\n");
-    }
-
-    #[test]
-    fn split_keepends_matches_python() {
-        let cases: &[(&str, &[&str])] = &[
-            ("", &[]),
-            ("a", &["a"]),
-            ("a\nb", &["a\n", "b"]),
-            ("a\rb", &["a\r", "b"]),
-            ("a\r\nb", &["a\r\n", "b"]),
-            ("a\x0bb", &["a\x0b", "b"]),
-            ("a\x0cb", &["a\x0c", "b"]),
-            ("a\x1cb", &["a\x1c", "b"]),
-            ("a\x1db", &["a\x1d", "b"]),
-            ("a\x1eb", &["a\x1e", "b"]),
-            ("a\u{85}b", &["a\u{85}", "b"]),
-            ("a\u{2028}b", &["a\u{2028}", "b"]),
-            ("a\u{2029}b", &["a\u{2029}", "b"]),
-            ("a\r\rb", &["a\r", "\r", "b"]),
-            ("a\n\rb", &["a\n", "\r", "b"]),
-            ("a\r\n\r\nb", &["a\r\n", "\r\n", "b"]),
-            ("\r\n", &["\r\n"]),
-            ("\r", &["\r"]),
-            ("x\u{85}\u{85}y", &["x\u{85}", "\u{85}", "y"]),
-        ];
-        for &(input, expected) in cases {
-            assert_eq!(split_keepends(input), expected, "{input:?}");
-        }
-    }
-
-    #[test]
-    fn lone_cr_hunk_matches_difflib() {
-        assert_eq!(
-            diff_text("a\rb\n", "a\rc\n", "a", "b"),
-            "--- a\n+++ b\n@@ -1,2 +1,2 @@\n a\r-b\n+c\n"
-        );
     }
 }

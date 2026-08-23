@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use tree_sitter::Node;
 
 use crate::ir::{CallKind, CallSite};
-use crate::lang::rust::{node_text, path_segments};
+use crate::lang::rust::path_segments;
+use crate::lang::node_text;
 
 const OMIT_MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
 
