@@ -76,7 +76,10 @@ const TWO_REVS: &str = "\
 const UNTRACKED: &str = "\
 --- HEAD
 +++ WORKTREE
-@@ -0,0 +1,2 @@
+@@ -1,2 +1,5 @@
+ fn main
+   return
++
 +fn extra
 +  return
 ";

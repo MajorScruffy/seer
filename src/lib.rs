@@ -50,7 +50,7 @@ pub fn outline_files(files: &[(String, String)]) -> String {
     ir::print(&ir::Outline { roots })
 }
 
-/// Diff two analyzed sets as call stacks into changed functions.
+/// Diff two analyzed sets as entry-rooted flow trees (each callee once).
 pub fn outline_diff(
     left: &[(String, String)],
     right: &[(String, String)],
@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn outline_diff_helper_shows_stack() {
+    fn outline_diff_nested_callee() {
         let left = [(
             "a.rs".into(),
             "fn process() { handle(); }\nfn handle() { return; }\n".into(),
@@ -126,17 +126,56 @@ mod tests {
 --- a
 +++ b
 @@ -1,3 +1,4 @@
- process > handle
- fn handle
--  return
-+  if true
-+    return
+ fn process
+   handle()
+-    return
++    if true
++      return
 "
         );
     }
 
     #[test]
-    fn outline_diff_new_fn_only() {
+    fn outline_diff_move_fn_empty() {
+        let left = [(
+            "a.rs".into(),
+            "fn process() { handle(); }\nfn handle() { return; }\n".into(),
+        )];
+        let right = [(
+            "a.rs".into(),
+            "fn handle() { return; }\nfn process() { handle(); }\n".into(),
+        )];
+        assert_eq!(outline_diff(&left, &right, "a", "b"), "");
+    }
+
+    #[test]
+    fn outline_diff_new_call() {
+        let left = [(
+            "a.rs".into(),
+            "fn process() { handle(); }\nfn handle() { return; }\n".into(),
+        )];
+        let right = [(
+            "a.rs".into(),
+            "fn process() { audit(); handle(); }\nfn handle() { return; }\nfn audit() { return; }\n"
+                .into(),
+        )];
+        assert_eq!(
+            outline_diff(&left, &right, "a", "b"),
+            "\
+--- a
++++ b
+@@ -1,3 +1,5 @@
+ fn process
++  audit()
++    return
+   handle()
+     return
+"
+        );
+    }
+
+    #[test]
+    fn outline_diff_new_entry() {
         let left = [("a.rs".into(), "fn main() { return; }\n".into())];
         let right = [(
             "a.rs".into(),
@@ -147,9 +186,39 @@ mod tests {
             "\
 --- HEAD
 +++ WORKTREE
-@@ -0,0 +1,2 @@
+@@ -1,2 +1,5 @@
 +fn extra
 +  return
++
+ fn main
+   return
+"
+        );
+    }
+
+    #[test]
+    fn outline_diff_expand_once() {
+        let left = [(
+            "a.rs".into(),
+            "fn a() { b(); c(); }\nfn b() { d(); }\nfn c() { d(); }\nfn d() { return; }\n".into(),
+        )];
+        let right = [(
+            "a.rs".into(),
+            "fn a() { b(); c(); }\nfn b() { d(); }\nfn c() { d(); }\nfn d() { todo!(); }\n".into(),
+        )];
+        assert_eq!(
+            outline_diff(&left, &right, "a", "b"),
+            "\
+--- a
++++ b
+@@ -1,6 +1,6 @@
+ fn a
+   b()
+     d()
+-      return
++      todo!()
+   c()
+     d()
 "
         );
     }
