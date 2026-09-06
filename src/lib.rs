@@ -5,6 +5,7 @@ mod diff;
 mod error;
 mod extract;
 mod git;
+mod graph;
 mod ir;
 mod lang;
 mod omit;
@@ -14,6 +15,10 @@ mod resolve;
 pub use collect::collect_source_files;
 pub use diff::diff_text;
 pub use error::SeerError;
+pub use graph::{
+    graph_files, print_graph_html, print_graph_json, print_graph_mermaid, CallGraph, GraphEdge,
+    GraphNode,
+};
 
 /// Successful CLI result. `exit` is 0 on success (including a printed diff).
 #[derive(Clone, Debug, PartialEq, Eq)]

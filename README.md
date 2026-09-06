@@ -15,6 +15,8 @@ cargo install --path .
 ```sh
 seer <file.rs|java|ts>   # tree (path:line on fns and expanded calls)
 seer                     # outline-diff dirty worktree vs HEAD
+seer graph PATH          # call graph (Mermaid)
+seer graph --format html PATH > graph.html
 seer diff REV1 REV2      # outline-diff two git revisions
 seer diff-trees a b      # diff two outline text files
 ```

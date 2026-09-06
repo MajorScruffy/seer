@@ -1,4 +1,4 @@
-use seer::outline_files;
+use seer::{graph_files, outline_files, print_graph_html, print_graph_json, print_graph_mermaid};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -222,6 +222,103 @@ fn cli_help_no_ansi() {
     let out = run(&["--help"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(!out.stdout.contains(&0x1b));
+}
+
+#[test]
+fn cli_help_has_graph() {
+    let out = run(&["--help"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(!out.stdout.contains(&0x1b));
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("graph"), "{help}");
+    assert!(help.contains("--format"), "{help}");
+}
+
+#[test]
+fn cli_graph_subcommand() {
+    let path = "tests/fixtures/tree/process_handle/input.rs";
+    let out = run(&["graph", path]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("flowchart TD\n"), "{stdout}");
+    assert!(stdout.contains(&format!("{path}:1 process")), "{stdout}");
+    let src = std::fs::read_to_string(path).unwrap();
+    let graph = graph_files(&[(path.to_string(), src)]);
+    assert_eq!(out.stdout, print_graph_mermaid(&graph).as_bytes());
+}
+
+#[test]
+fn cli_graph_json() {
+    let out = run(&[
+        "graph",
+        "--format",
+        "json",
+        "tests/fixtures/tree/empty_file/input.rs",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn cli_graph_html() {
+    let out = run(&[
+        "graph",
+        "--format",
+        "html",
+        "tests/fixtures/tree/empty_file/input.rs",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn cli_graph_html_process_handle() {
+    let path = "tests/fixtures/tree/process_handle/input.rs";
+    let out = run(&["graph", "--format", "html", path]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let src = std::fs::read_to_string(path).unwrap();
+    let files = [(path.to_string(), src)];
+    let graph = graph_files(&files);
+    assert_eq!(out.stdout, print_graph_html(&graph, &files).as_bytes());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("<!DOCTYPE html>\n"));
+    assert!(!stdout.contains("<script src"));
+    assert_eq!(
+        run(&["graph", path, "--format=json"]).stdout,
+        print_graph_json(&graph).as_bytes()
+    );
+}
+
+#[test]
+fn cli_graph_bad_format() {
+    let out = run(&["graph", "--format", "dot", "x.rs"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn cli_graph_no_path_tty() {
+    let err = seer::run_with(&["seer".into(), "graph".into()], true).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
 }
 
 #[test]

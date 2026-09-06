@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    {
+      "id": "input.rs:0",
+      "kind": "function",
+      "name": "f",
+      "file": "input.rs",
+      "line": 1,
+      "entry": true
+    },
+    {
+      "id": "input.rs:58",
+      "kind": "function",
+      "name": "compute",
+      "file": "input.rs",
+      "line": 6,
+      "entry": false
+    }
+  ],
+  "edges": [
+    {
+      "from": "input.rs:0",
+      "to": "input.rs:58",
+      "label": "compute()",
+      "seq": 0
+    },
+    {
+      "from": "input.rs:0",
+      "to": "input.rs:58",
+      "label": "compute()",
+      "seq": 1
+    }
+  ]
+}

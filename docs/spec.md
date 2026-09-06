@@ -136,7 +136,7 @@ Cargo.toml
 Cargo.lock              # commit it
 rustfmt.toml
 src/main.rs             # argv → seer::run → stdout/stderr/exit
-src/lib.rs              # public: run, outline_files, outline_diff, diff_text
+src/lib.rs              # public: run, outline_files, outline_diff, diff_text, graph_files
 src/cli.rs              # parse Cmd (no clap)
 src/error.rs            # SeerError + exit codes
 src/collect.rs          # file walk, stdin
@@ -148,6 +148,9 @@ src/resolve.rs          # name + use resolve, expand, outline
 src/collapse.rs         # whitespace collapse outside literals
 src/diff.rs             # unified diff
 src/git.rs              # rev-parse, ls-tree, cat-file --batch
+src/graph.rs            # CallGraph, mermaid / json / html printers
+src/graph.css           # HTML viewer stylesheet
+src/graph.js            # Canvas 2D viewer + layout
 src/bin/seer-view.rs    # side-by-side colored seer diff
 src/lang/mod.rs
 src/lang/rust.rs        # node-kind table + header reconstruction
@@ -159,6 +162,7 @@ tests/git.rs            # temp-repo commit and dirty tests
 tests/common/mod.rs     # read fixture dir, assert_bytes
 tests/fixtures/tree/<name>/...
 tests/fixtures/diff/<name>/...
+tests/fixtures/graph/<name>/...
 ```
 
 `Cargo.toml` (normative fields):
@@ -717,6 +721,7 @@ This is a new binary. There is no previous CLI.
 seer [--help] [--version] [--max-lines N]
 seer <PATH>
 seer tree [PATH]
+seer graph [--format mermaid|json|html] [PATH]
 seer diff [REV] [REV] [--] [PATH...]
 seer -- [PATH...]
 seer diff-trees <A> <B>
@@ -730,6 +735,7 @@ enum Cmd {
     Tree { path: Option<String>, max_lines: Option<usize> },
     Diff { revs: Vec<String>, paths: Vec<String>, max_lines: Option<usize> },
     DiffTrees { a: String, b: String, max_lines: Option<usize> },
+    Graph { path: Option<String>, format: mermaid|json|html, max_lines: Option<usize> },
 }
 
 let rest = strip_max_lines(&args[1..]);
@@ -737,6 +743,7 @@ match rest.first() {
     Some("-h" | "--help")    => Cmd::Help
     Some("-V" | "--version") => Cmd::Version
     Some("tree")       => remaining path optional
+    Some("graph")      => see [graph.md](graph.md); `--format mermaid|json|html`, path optional
     Some("diff")       => 0..=2 revs, optional `--` path filters
     Some("diff-trees") => two paths
     Some("--")         => git WORKTREE vs HEAD, path filters
@@ -760,11 +767,12 @@ Dispatch (behavior table):
 | `seer diff REV1 REV2` | Git: outline(`REV1`) vs outline(`REV2`) (old → new) |
 | `seer -- PATH...` / `seer diff -- PATH...` | Same as `seer diff`, files limited to those path filters (cwd-relative, like git) |
 | `seer diff REV1 REV2 -- PATH...` | Two-rev outline-diff, path-limited |
+| `seer graph ...` | Call graph; see [graph.md](graph.md) |
 | `seer diff-trees A B` | Diff file `A` vs file `B` as outline **text** (do not re-parse as Rust) |
 | `seer --help` / `seer --version` | hardcoded HELP / `seer <version>`, exit 0 |
 | `seer diff a b c --` | exit 2 (too many revs) |
 
-Subcommand names win over paths: `seer diff` is never “tree the file named `diff`”. Use `seer ./diff` to outline a file named `diff`.
+Subcommand names win over paths: `seer diff` is never “tree the file named `diff`”. Use `seer ./diff` to outline a file named `diff`. `seer graph` is the call-graph command; see [graph.md](graph.md).
 
 v1 flags: `--help` / `--version` / `--max-lines N`. Do not add `--format`, `--depth`, `--color`, or `--ignore`. `--max-lines` may appear anywhere after argv0 (`--max-lines 80` or `--max-lines=80`). N must be ≥ 1. `--max-lines` does not cap `--help` / `--version` (including `seer tree --help`).
 
@@ -1046,12 +1054,18 @@ Java and TypeScript are implemented (see omit table, collect extensions, goldens
 
 ---
 
+## Call graph
+
+In-memory call graph with Mermaid, JSON, and HTML printers: [graph.md](graph.md). That spec does not change tree or diff. `seer graph --format` is not a tree/diff flag.
+
+---
+
 ## Open Questions
 
 Only items **not** decided by the product conversation. Do not treat these as an invitation to change decided items (tree-sitter, outline shape, omit logs not clone, expand local only, show external leaves, no box-drawing, Rust first).
 
 1. **User `--ignore` / config file format** for extending the omit list. v1 is hardcoded. Defer.
-2. **`--depth` and `--format`.** Defer. No `--format` on tree or diff.
+2. **`--depth` and `--format`.** Defer for tree and diff. No `--format` on those commands. `seer graph --format` is specified in [graph.md](graph.md).
 3. **File-path headers** in multi-file / git outlines. **Decided:** tree prints `path:line` on `fn` roots and resolved calls; flow/diff prints `path` without the line so a line-only shift is quiet.
 4. **Reading the target `Cargo.toml`.** v1 does not. Deferred: `[package].name` as a local prefix, `[dependencies]` (including `foo-bar` vs `foo_bar`), workspace members, and per-side blob `Cargo.toml` for `seer diff REV1 REV2`. Until then, only `std`/`core`/`alloc`/`proc_macro`/`test` plus existing module paths are known; `serde_json::…` is an external leaf.
 5. **Block-scoped `use` and `#[cfg]`-gated duplicates.** v1 is file-scoped uses and all fns visible.

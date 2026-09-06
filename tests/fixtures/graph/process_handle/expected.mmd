@@ -1,0 +1,8 @@
+flowchart TD
+  n0["input.rs:1 process"]
+  n1["input.rs:13 handle"]
+  n2["fs::write(path, data)"]
+  n3["serde_json::to_string(item)"]
+  n0 --> n1
+  n1 --> n2
+  n1 --> n3

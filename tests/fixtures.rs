@@ -1,7 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use seer::{collect_source_files, diff_text, outline_files};
+use seer::{
+    collect_source_files, diff_text, graph_files, outline_files, print_graph_json,
+    print_graph_mermaid,
+};
 
 #[test]
 fn tree_goldens() {
@@ -68,6 +71,75 @@ fn diff_goldens() {
             .unwrap_or_else(|e| panic!("read expected.txt in {}: {e}", dir.display()));
         let actual = diff_text(&a, &b, "a", "b");
         assert_bytes_eq(&format!("diff/{name}"), &expected, actual.as_bytes());
+    }
+}
+
+#[test]
+fn graph_goldens() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/graph");
+    let mut names: Vec<String> = fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if entry.file_type().ok()?.is_dir() {
+                Some(entry.file_name().to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+    names.sort();
+    assert!(
+        !names.is_empty(),
+        "no graph fixtures under {}",
+        root.display()
+    );
+    for name in names {
+        let dir = root.join(&name);
+        let graph = graph_fixture(&dir);
+        let mermaid = print_graph_mermaid(&graph);
+        let json = print_graph_json(&graph);
+        let mmd_path = dir.join("expected.mmd");
+        let json_path = dir.join("expected.json");
+        if std::env::var("UPDATE_GOLDENS").is_ok() {
+            fs::write(&mmd_path, &mermaid)
+                .unwrap_or_else(|e| panic!("write {}: {e}", mmd_path.display()));
+            if json_path.is_file() || name == "process_handle" || name == "call_in_let" {
+                fs::write(&json_path, &json)
+                    .unwrap_or_else(|e| panic!("write {}: {e}", json_path.display()));
+            }
+            continue;
+        }
+        let expected = fs::read(&mmd_path)
+            .unwrap_or_else(|e| panic!("read expected.mmd in {}: {e}", dir.display()));
+        assert_bytes_eq(&format!("graph/{name}.mmd"), &expected, mermaid.as_bytes());
+        if json_path.is_file() {
+            let expected = fs::read(&json_path)
+                .unwrap_or_else(|e| panic!("read expected.json in {}: {e}", dir.display()));
+            assert_bytes_eq(&format!("graph/{name}.json"), &expected, json.as_bytes());
+        }
+    }
+}
+
+fn graph_fixture(dir: &Path) -> seer::CallGraph {
+    let input_dir = dir.join("input");
+    for name in ["input.rs", "input.java", "input.ts", "input.tsx"] {
+        let path = dir.join(name);
+        if path.is_file() {
+            let contents = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            return graph_files(&[(name.to_string(), contents)]);
+        }
+    }
+    if input_dir.is_dir() {
+        let files = collect_source_files(&input_dir)
+            .unwrap_or_else(|e| panic!("collect {}: {e}", input_dir.display()));
+        graph_files(&files)
+    } else {
+        panic!(
+            "fixture {} has neither input.rs/java/ts/tsx nor input/",
+            dir.display()
+        )
     }
 }
 

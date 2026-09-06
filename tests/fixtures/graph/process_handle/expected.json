@@ -1,0 +1,50 @@
+{
+  "nodes": [
+    {
+      "id": "input.rs:0",
+      "kind": "function",
+      "name": "process",
+      "file": "input.rs",
+      "line": 1,
+      "entry": true
+    },
+    {
+      "id": "input.rs:200",
+      "kind": "function",
+      "name": "handle",
+      "file": "input.rs",
+      "line": 13,
+      "entry": false
+    },
+    {
+      "id": "leaf:fs::write(path, data)",
+      "kind": "leaf",
+      "label": "fs::write(path, data)"
+    },
+    {
+      "id": "leaf:serde_json::to_string(item)",
+      "kind": "leaf",
+      "label": "serde_json::to_string(item)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "input.rs:0",
+      "to": "input.rs:200",
+      "label": "handle(item)",
+      "seq": 0
+    },
+    {
+      "from": "input.rs:200",
+      "to": "leaf:fs::write(path, data)",
+      "label": "fs::write(path, data)",
+      "seq": 1
+    },
+    {
+      "from": "input.rs:200",
+      "to": "leaf:serde_json::to_string(item)",
+      "label": "serde_json::to_string(item)",
+      "seq": 0
+    }
+  ]
+}
