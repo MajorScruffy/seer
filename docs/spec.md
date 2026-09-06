@@ -151,7 +151,7 @@ src/git.rs              # rev-parse, ls-tree, cat-file --batch
 src/graph.rs            # CallGraph, mermaid / json / html printers
 src/graph.css           # HTML viewer stylesheet
 src/graph.js            # Canvas 2D viewer + layout
-src/bin/seer-view.rs    # side-by-side colored seer diff
+src/bin/seer-view.rs    # TUI: commits + inline or side-by-side seer diff
 src/lang/mod.rs
 src/lang/rust.rs        # node-kind table + header reconstruction
 src/lang/java.rs

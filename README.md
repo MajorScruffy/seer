@@ -22,3 +22,5 @@ seer diff-trees a b      # diff two outline text files
 ```
 
 Exit 0 on success, including a printed diff. Empty stdout means no outline change. Exit 2 usage, 3 runtime.
+
+`seer --help` prints a sample tree. `seer-view` is a lazygit-style TUI of `seer diff`: commits, files, outline. `d` toggles inline vs side-by-side. One commit vs its parent; `J`/`K` selects a range (first..last). `q` quits.

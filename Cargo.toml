@@ -8,6 +8,7 @@ description = "Control-and-call outlines of source code"
 repository = "https://github.com/MajorScruffy/seer"
 
 [dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "all-widgets"] }
 tree-sitter = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-rust = "0.24"
