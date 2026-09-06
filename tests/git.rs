@@ -263,7 +263,7 @@ fn git_invalid_rev() {
 
 #[test]
 fn git_diff_too_many_revs() {
-    let too_many = ["diff", "a", "b", "c"];
+    let too_many = ["diff", "a", "b", "c", "--"];
 
     let repo = init_repo();
     let in_repo = seer(repo.path(), &too_many);
@@ -284,4 +284,85 @@ fn git_diff_too_many_revs() {
         String::from_utf8_lossy(&outside.stderr)
     );
     assert!(outside.stdout.is_empty());
+}
+
+#[test]
+fn git_pathspec_hides_other_file() {
+    let repo = init_repo();
+    let root = repo.path();
+    write(&root.join("keep.rs"), SRC_CLEAN);
+    write(&root.join("skip.rs"), SRC_CLEAN);
+    git(root, &["add", "keep.rs", "skip.rs"]);
+    git(root, &["commit", "-m", "c1"]);
+    write(&root.join("keep.rs"), SRC_DIRTY);
+    write(&root.join("skip.rs"), SRC_DIRTY);
+
+    let whole = seer(root, &[]);
+    assert!(
+        String::from_utf8_lossy(&whole.stdout).contains("skip.rs"),
+        "{}",
+        String::from_utf8_lossy(&whole.stdout)
+    );
+
+    let limited = seer(root, &["diff", "--", "keep.rs"]);
+    assert_eq!(
+        limited.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&limited.stderr)
+    );
+    assert_eq!(
+        limited.stdout,
+        b"\
+--- HEAD
++++ WORKTREE
+@@ -1,2 +1,3 @@
+ keep.rs fn main
+-  return
++  if true
++    return
+"
+    );
+
+    let no_dash = seer(root, &["diff", "keep.rs"]);
+    assert_eq!(no_dash.stdout, limited.stdout);
+
+    let default_dash = seer(root, &["--", "keep.rs"]);
+    assert_eq!(default_dash.stdout, limited.stdout);
+}
+
+#[test]
+fn git_pathspec_from_subdir_and_two_revs() {
+    let repo = init_repo();
+    let root = repo.path();
+    write(&root.join("root.rs"), SRC_CLEAN);
+    write(&root.join("src/main.rs"), SRC_CLEAN);
+    git(root, &["add", "root.rs", "src/main.rs"]);
+    git(root, &["commit", "-m", "c1"]);
+    write(&root.join("root.rs"), SRC_DIRTY);
+    write(&root.join("src/main.rs"), SRC_DIRTY);
+
+    let from_src = seer(&root.join("src"), &["diff", "--", "main.rs"]);
+    assert_eq!(
+        from_src.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&from_src.stderr)
+    );
+    let out = String::from_utf8_lossy(&from_src.stdout);
+    assert!(out.contains("src/main.rs"), "{out}");
+    assert!(!out.contains("root.rs"), "{out}");
+
+    git(root, &["add", "src/main.rs"]);
+    git(root, &["commit", "-m", "c2"]);
+    let two = seer(root, &["diff", "HEAD~1", "HEAD", "--", "src/main.rs"]);
+    assert_eq!(
+        two.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&two.stderr)
+    );
+    let two_out = String::from_utf8_lossy(&two.stdout);
+    assert!(two_out.contains("src/main.rs"), "{two_out}");
+    assert!(!two_out.contains("root.rs"), "{two_out}");
 }

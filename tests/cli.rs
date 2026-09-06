@@ -222,6 +222,11 @@ fn cli_help_no_ansi() {
     let out = run(&["--help"]);
     assert_eq!(out.status.code(), Some(0));
     assert!(!out.stdout.contains(&0x1b));
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("--max-lines"));
+    assert!(help.contains("seer -- src/foo.rs"));
+    assert!(help.contains("input.rs:1 fn process"));
+    assert!(help.contains("Exit 0"));
 }
 
 #[test]
@@ -319,6 +324,22 @@ fn cli_graph_bad_format() {
 fn cli_graph_no_path_tty() {
     let err = seer::run_with(&["seer".into(), "graph".into()], true).unwrap_err();
     assert_eq!(err.exit_code(), 2);
+}
+
+#[test]
+fn cli_max_lines_truncates() {
+    let path = "tests/fixtures/tree/process_handle/input.rs";
+    let out = run(&["--max-lines", "3", "tree", path]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(stdout.lines().count(), 4); // 3 kept + truncation line
+    assert!(stdout.contains("... truncated (3/"));
+    assert!(stdout.contains("fn process"));
 }
 
 #[test]

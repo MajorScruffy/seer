@@ -139,7 +139,7 @@ src/main.rs             # argv → seer::run → stdout/stderr/exit
 src/lib.rs              # public: run, outline_files, outline_diff, diff_text, graph_files
 src/cli.rs              # parse Cmd (no clap)
 src/error.rs            # SeerError + exit codes
-src/collect.rs          # file walk, stdin
+src/collect.rs          # file walk, stdin, repo-relative path filters
 src/parse.rs            # tree-sitter parse → Tree
 src/ir.rs               # Outline / loc / Label / RawNode / FnDef / FnId / print
 src/extract.rs          # CST → unexpanded RawNode per function
@@ -721,7 +721,6 @@ This is a new binary. There is no previous CLI.
 seer [--help] [--version] [--max-lines N]
 seer <PATH>
 seer tree [PATH]
-seer graph [--format mermaid|json|html] [PATH]
 seer diff [REV] [REV] [--] [PATH...]
 seer -- [PATH...]
 seer diff-trees <A> <B>

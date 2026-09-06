@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::lang::{is_source_filename, supported_languages_msg};
 use crate::SeerError;
@@ -16,7 +16,7 @@ pub fn collect_path(path_arg: &str) -> Result<Vec<(String, String)>, SeerError> 
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             return Err(SeerError::Io(format!("path not found: {path_arg}")));
         }
-        Err(e) => return Err(io_err(path, e)),
+        Err(e) => return Err(io_error(path, e)),
     };
     if meta.is_dir() {
         collect_source_files(path)
@@ -54,7 +54,7 @@ fn collect_one_file(path_arg: &str, path: &Path) -> Result<Vec<(String, String)>
     }
     // CLI single-file FnId.file is the argv spelling; only `\` → `/`.
     let posix = path_arg.replace('\\', "/");
-    let bytes = fs::read(path).map_err(|e| io_err(path, e))?;
+    let bytes = fs::read(path).map_err(|e| io_error(path, e))?;
     let src =
         String::from_utf8(bytes).map_err(|_| SeerError::Io(format!("invalid utf-8: {posix}")))?;
     Ok(vec![(posix, src)])
@@ -63,16 +63,20 @@ fn collect_one_file(path_arg: &str, path: &Path) -> Result<Vec<(String, String)>
 /// Regular source files under `root` as `(posix_relpath, utf8_source)`, sorted.
 pub fn collect_source_files(root: &Path) -> Result<Vec<(String, String)>, SeerError> {
     let mut files = Vec::new();
-    walk(root, Path::new(""), &mut files)?;
+    walk_directory(root, Path::new(""), &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(files)
 }
 
-fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), SeerError> {
-    let entries = fs::read_dir(abs).map_err(|e| io_err(abs, e))?;
+fn walk_directory(
+    abs: &Path,
+    rel: &Path,
+    out: &mut Vec<(String, String)>,
+) -> Result<(), SeerError> {
+    let entries = fs::read_dir(abs).map_err(|e| io_error(abs, e))?;
     for entry in entries {
-        let entry = entry.map_err(|e| io_err(abs, e))?;
-        let ft = entry.file_type().map_err(|e| io_err(&entry.path(), e))?;
+        let entry = entry.map_err(|e| io_error(abs, e))?;
+        let ft = entry.file_type().map_err(|e| io_error(&entry.path(), e))?;
         // file_type does not follow the link; metadata/is_dir would.
         if ft.is_symlink() {
             continue;
@@ -82,16 +86,16 @@ fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), S
             Some(s) => s,
             None => continue,
         };
-        if excluded_component(name) {
+        if is_skipped_dir_name(name) {
             continue;
         }
         let child_rel: PathBuf = rel.join(name);
         let child_abs = entry.path();
         if ft.is_dir() {
-            walk(&child_abs, &child_rel, out)?;
+            walk_directory(&child_abs, &child_rel, out)?;
         } else if ft.is_file() && is_source_filename(name) {
-            let posix = posix_rel(&child_rel);
-            let bytes = fs::read(&child_abs).map_err(|e| io_err(&child_abs, e))?;
+            let posix = posix_relative(&child_rel);
+            let bytes = fs::read(&child_abs).map_err(|e| io_error(&child_abs, e))?;
             let src = String::from_utf8(bytes)
                 .map_err(|_| SeerError::Io(format!("invalid utf-8: {posix}")))?;
             out.push((posix, src));
@@ -100,15 +104,124 @@ fn walk(abs: &Path, rel: &Path, out: &mut Vec<(String, String)>) -> Result<(), S
     Ok(())
 }
 
-pub(crate) fn excluded_component(name: &str) -> bool {
+fn is_skipped_dir_name(name: &str) -> bool {
     name == "target" || name == ".git" || name == "node_modules" || name.starts_with('.')
 }
 
-fn posix_rel(rel: &Path) -> String {
+pub(crate) fn is_source_file_path(posix: &str) -> bool {
+    let mut last = "";
+    for comp in posix.split('/') {
+        if comp.is_empty() {
+            continue;
+        }
+        if is_skipped_dir_name(comp) {
+            return false;
+        }
+        last = comp;
+    }
+    is_source_filename(last)
+}
+
+/// True if `file` is one of the path filters, or is under one of them as a directory.
+pub(crate) fn file_is_under_any_path(file: &str, path_filters: &[String]) -> bool {
+    if path_filters.is_empty() {
+        return true;
+    }
+    path_filters.iter().any(|filter| {
+        filter.is_empty() || file == filter || file.starts_with(&format!("{filter}/"))
+    })
+}
+
+/// Map cwd-relative paths to paths from the git repo root. Canonicalize so a symlink cwd still maps in.
+pub(crate) fn repo_relative_paths(
+    cwd: &Path,
+    repo_root: &Path,
+    paths: &[String],
+) -> Result<Vec<String>, SeerError> {
+    paths
+        .iter()
+        .map(|path| repo_relative_path(cwd, repo_root, path))
+        .collect()
+}
+
+fn repo_relative_path(cwd: &Path, repo_root: &Path, path: &str) -> Result<String, SeerError> {
+    let cwd = fs::canonicalize(cwd).unwrap_or_else(|_| normalize_path(cwd));
+    let repo_root = fs::canonicalize(repo_root).unwrap_or_else(|_| normalize_path(repo_root));
+    let given = Path::new(path);
+    let joined = if given.is_absolute() {
+        fs::canonicalize(given).unwrap_or_else(|_| normalize_path(given))
+    } else {
+        let p = cwd.join(given);
+        fs::canonicalize(&p).unwrap_or_else(|_| normalize_path(&p))
+    };
+    let rel = joined
+        .strip_prefix(&repo_root)
+        .map_err(|_| SeerError::Usage(format!("path outside worktree: {path}")))?;
+    Ok(posix_relative(rel).trim_end_matches('/').to_string())
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(p) => out.push(p.as_os_str()),
+            Component::RootDir => out.push(c),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(s) => out.push(s),
+        }
+    }
+    out
+}
+
+/// Worktree sources under `repo_root`, limited to `path_filters` when non-empty.
+pub(crate) fn collect_worktree(
+    repo_root: &Path,
+    path_filters: &[String],
+) -> Result<Vec<(String, String)>, SeerError> {
+    if path_filters.is_empty() {
+        return collect_source_files(repo_root);
+    }
+    let mut files = Vec::new();
+    for filter in path_filters {
+        let abs = repo_root.join(filter);
+        if abs.is_file() {
+            if let Some(pair) = read_source_file(&abs, filter)? {
+                files.push(pair);
+            }
+        } else if abs.is_dir() {
+            for (p, src) in collect_source_files(&abs)? {
+                let full = if filter.is_empty() {
+                    p
+                } else {
+                    format!("{filter}/{p}")
+                };
+                files.push((full, src));
+            }
+        }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files.dedup_by(|a, b| a.0 == b.0);
+    Ok(files)
+}
+
+fn read_source_file(abs: &Path, rel: &str) -> Result<Option<(String, String)>, SeerError> {
+    if !is_source_file_path(rel) {
+        return Ok(None);
+    }
+    let bytes = fs::read(abs).map_err(|e| SeerError::Io(format!("{}: {e}", abs.display())))?;
+    let src =
+        String::from_utf8(bytes).map_err(|_| SeerError::Io(format!("invalid utf-8: {rel}")))?;
+    Ok(Some((rel.to_string(), src)))
+}
+
+fn posix_relative(rel: &Path) -> String {
     rel.to_string_lossy().replace('\\', "/")
 }
 
-fn io_err(path: &Path, err: std::io::Error) -> SeerError {
+fn io_error(path: &Path, err: std::io::Error) -> SeerError {
     SeerError::Io(format!("{}: {err}", path.display()))
 }
 
@@ -242,5 +355,35 @@ mod tests {
         let files = collect_source_files(root).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(paths, ["other/x.rs", "real.rs"]);
+    }
+
+    #[test]
+    fn matches_file_and_dir() {
+        assert!(file_is_under_any_path(
+            "src/main.rs",
+            &["src/main.rs".into()]
+        ));
+        assert!(file_is_under_any_path("src/main.rs", &["src".into()]));
+        assert!(!file_is_under_any_path("root.rs", &["src".into()]));
+        assert!(file_is_under_any_path("src/main.rs", &[]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_relative_path_via_symlink_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("foo.rs"), "fn a() {}\n").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(
+            repo_relative_path(&link, &real, "foo.rs").unwrap(),
+            "foo.rs"
+        );
+        assert_eq!(
+            repo_relative_path(&link, &real, link.join("foo.rs").to_str().unwrap()).unwrap(),
+            "foo.rs"
+        );
     }
 }
