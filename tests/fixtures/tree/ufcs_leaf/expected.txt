@@ -1,5 +1,5 @@
-fn valid
+input.rs:4 fn valid
   return
 
-fn process
+input.rs:9 fn process
   Item::valid(item)

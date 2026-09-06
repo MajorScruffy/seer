@@ -1,10 +1,10 @@
-fn outer
+input.rs:1 fn outer
   fn inner
     return
-  inner()
+  input.rs:2 inner()
     return
 
-fn other
+input.rs:8 fn other
   fn unused
     return
   return

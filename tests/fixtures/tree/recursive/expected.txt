@@ -1,3 +1,4 @@
-fn walk
+input.rs:1 fn walk
   if node.has_child()
-    walk(node.child()) [recursive]
+    input.rs:1 walk(node.child()) [recursive]
+    node.child()

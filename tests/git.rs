@@ -57,7 +57,7 @@ const DIRTY_VS_HEAD: &str = "\
 --- HEAD
 +++ WORKTREE
 @@ -1,2 +1,3 @@
- fn main
+ src.rs fn main
 -  return
 +  if true
 +    return
@@ -67,7 +67,7 @@ const TWO_REVS: &str = "\
 --- HEAD~1
 +++ HEAD
 @@ -1,2 +1,3 @@
- fn main
+ src.rs fn main
 -  return
 +  if true
 +    return
@@ -77,10 +77,10 @@ const UNTRACKED: &str = "\
 --- HEAD
 +++ WORKTREE
 @@ -1,2 +1,5 @@
- fn main
+ a.rs fn main
    return
 +
-+fn extra
++b.rs fn extra
 +  return
 ";
 
@@ -96,7 +96,7 @@ fn git_dirty_vs_head() {
     let no_args = seer(root, &[]);
     assert_eq!(
         no_args.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&no_args.stderr)
     );
@@ -105,7 +105,7 @@ fn git_dirty_vs_head() {
     let diff = seer(root, &["diff"]);
     assert_eq!(
         diff.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&diff.stderr)
     );
@@ -137,7 +137,7 @@ fn git_diff_two_revs() {
     let out = seer(root, &["diff", "HEAD~1", "HEAD"]);
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -173,7 +173,7 @@ fn extra() {
     let out = seer(root, &[]);
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -221,11 +221,11 @@ fn root() {
     let dirty_src = seer(&src_dir, &[]);
     assert_eq!(
         dirty_root.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&dirty_root.stderr)
     );
-    assert_eq!(dirty_src.status.code(), Some(1));
+    assert_eq!(dirty_src.status.code(), Some(0));
     assert_eq!(dirty_root.stdout, dirty_src.stdout);
 }
 
@@ -242,11 +242,11 @@ fn git_diff_one_rev() {
     let one_rev = seer(root, &["diff", "HEAD"]);
     assert_eq!(
         no_args.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&no_args.stderr)
     );
-    assert_eq!(one_rev.status.code(), Some(1));
+    assert_eq!(one_rev.status.code(), Some(0));
     assert_eq!(no_args.stdout, one_rev.stdout);
     assert_eq!(one_rev.stdout, DIRTY_VS_HEAD.as_bytes());
 }

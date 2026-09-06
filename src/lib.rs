@@ -15,7 +15,7 @@ pub use collect::collect_source_files;
 pub use diff::diff_text;
 pub use error::SeerError;
 
-/// Successful CLI result. `exit` is 0 or 1.
+/// Successful CLI result. `exit` is 0 on success (including a printed diff).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunOutput {
     pub stdout: String,
@@ -34,20 +34,10 @@ pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, S
 /// `files` is (posix_relpath, rust_source_utf8). Sorted here if needed.
 /// Does **not** read the disk and does **not** take Cargo.toml bytes (v1).
 pub fn outline_files(files: &[(String, String)]) -> String {
-    let index = resolve::index_files(files);
-    let called = resolve::called_targets(&index);
-    let entries = resolve::select_entries(&index, &called);
-    let mut roots = Vec::new();
-    for id in entries {
-        let def = index.def(&id).expect("entry is indexed");
-        let mut stack = Vec::new();
-        let children = resolve::expand_fn(def, &mut stack, &index);
-        roots.push(ir::OutlineNode {
-            text: format!("fn {}", def.name),
-            children,
-        });
-    }
-    ir::print(&ir::Outline { roots })
+    ir::print_outline(
+        &resolve::outline(&resolve::index_files(files), resolve::Expand::Every),
+        ir::Label::Jump,
+    )
 }
 
 /// Diff two analyzed sets as entry-rooted flow trees (each callee once).
@@ -57,8 +47,19 @@ pub fn outline_diff(
     name_a: &str,
     name_b: &str,
 ) -> String {
-    let (a, b) = resolve::flow_diff(&resolve::index_files(left), &resolve::index_files(right));
-    diff_text(&a, &b, name_a, name_b)
+    diff_text(
+        &outline_for_diff(left),
+        &outline_for_diff(right),
+        name_a,
+        name_b,
+    )
+}
+
+fn outline_for_diff(files: &[(String, String)]) -> String {
+    ir::print_outline(
+        &resolve::outline(&resolve::index_files(files), resolve::Expand::Once),
+        ir::Label::Flow,
+    )
 }
 
 #[cfg(test)]
@@ -101,7 +102,7 @@ mod tests {
         );
         assert_eq!(
             outline_files(&[b, a]),
-            "fn a\n  fn inner\n    return\n  return\n\nfn b\n  return\n"
+            "a.rs:2 fn a\n  fn inner\n    return\n  return\n\nb.rs:1 fn b\n  return\n"
         );
     }
 
@@ -126,8 +127,8 @@ mod tests {
 --- a
 +++ b
 @@ -1,3 +1,4 @@
- fn process
-   handle()
+ a.rs fn process
+   a.rs handle()
 -    return
 +    if true
 +      return
@@ -165,10 +166,10 @@ mod tests {
 --- a
 +++ b
 @@ -1,3 +1,5 @@
- fn process
-+  audit()
+ a.rs fn process
++  a.rs audit()
 +    return
-   handle()
+   a.rs handle()
      return
 "
         );
@@ -187,10 +188,10 @@ mod tests {
 --- HEAD
 +++ WORKTREE
 @@ -1,2 +1,5 @@
-+fn extra
++a.rs fn extra
 +  return
 +
- fn main
+ a.rs fn main
    return
 "
         );
@@ -212,13 +213,13 @@ mod tests {
 --- a
 +++ b
 @@ -1,6 +1,6 @@
- fn a
-   b()
-     d()
+ a.rs fn a
+   a.rs b()
+     a.rs d()
 -      return
 +      todo!()
-   c()
-     d()
+   a.rs c()
+     a.rs d()
 "
         );
     }

@@ -1,3 +1,4 @@
+use seer::outline_files;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -17,6 +18,16 @@ fn tree_fixture(name: &str, file: &str) -> PathBuf {
 
 fn expected(name: &str) -> Vec<u8> {
     std::fs::read(tree_fixture(name, "expected.txt")).unwrap()
+}
+
+fn outline_path(path: &str) -> Vec<u8> {
+    let src = std::fs::read_to_string(path).unwrap();
+    outline_files(&[(path.to_string(), src)]).into_bytes()
+}
+
+fn outline_stdin(src: &[u8]) -> Vec<u8> {
+    let src = String::from_utf8(src.to_vec()).unwrap();
+    outline_files(&[("<stdin>".into(), src)]).into_bytes()
 }
 
 fn run(args: &[&str]) -> Output {
@@ -40,14 +51,15 @@ fn run_stdin(args: &[&str], stdin: &[u8]) -> Output {
 
 #[test]
 fn cli_tree_subcommand() {
-    let out = run(&["tree", "tests/fixtures/tree/process_handle/input.rs"]);
+    let path = "tests/fixtures/tree/process_handle/input.rs";
+    let out = run(&["tree", path]);
     assert_eq!(
         out.status.code(),
         Some(0),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, expected("process_handle"));
+    assert_eq!(out.stdout, outline_path(path));
 }
 
 #[test]
@@ -72,7 +84,7 @@ fn cli_tree_stdin_piped() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, expected("process_handle"));
+    assert_eq!(out.stdout, outline_stdin(&src));
 }
 
 #[test]
@@ -85,7 +97,7 @@ fn cli_tree_dash() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, expected("process_handle"));
+    assert_eq!(out.stdout, outline_stdin(&src));
 }
 
 #[test]
@@ -122,7 +134,10 @@ fn cli_tree_java() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, expected("java_process_handle"));
+    assert_eq!(
+        out.stdout,
+        outline_path("tests/fixtures/tree/java_process_handle/input.java")
+    );
 }
 
 #[test]
@@ -134,7 +149,10 @@ fn cli_tree_typescript() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(out.stdout, expected("ts_process_handle"));
+    assert_eq!(
+        out.stdout,
+        outline_path("tests/fixtures/tree/ts_process_handle/input.ts")
+    );
 }
 
 #[test]
@@ -165,7 +183,7 @@ fn cli_diff_trees_simple() {
     ]);
     assert_eq!(
         out.status.code(),
-        Some(1),
+        Some(0),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );

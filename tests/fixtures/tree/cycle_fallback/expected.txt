@@ -1,7 +1,7 @@
-fn a
-  b()
-    a() [recursive]
+input.rs:1 fn a
+  input.rs:5 b()
+    input.rs:1 a() [recursive]
 
-fn b
-  a()
-    b() [recursive]
+input.rs:5 fn b
+  input.rs:1 a()
+    input.rs:5 b() [recursive]

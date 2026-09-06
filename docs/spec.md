@@ -10,9 +10,7 @@
 | **Repo** | https://github.com/MajorScruffy/seer (local: `/home/stefan/Work/seer`) |
 | **Audience** | Implementing agents and reviewers. This document is the behavior oracle. |
 
-When this spec is committed, it lives at `docs/spec.md`. Paths below are relative to the repo root.
-
-The repo today contains only `LICENSE` and the initial commit. There is no existing architecture to match. This spec defines a new Rust CLI.
+This file lives at `docs/spec.md`. Paths below are relative to the repo root. `cargo test` is the merge gate: if this document and a test disagree, fix this document.
 
 **How to use this document.** Every implementable claim has a check. Do not invent output format, indent width, omit rules, or resolve order. If a behavior is not in this spec, it is either forbidden in v1 or listed under [Open Questions](#open-questions). Do not “improve” the outline shape.
 
@@ -22,7 +20,7 @@ The repo today contains only `LICENSE` and the initial commit. There is no exist
 
 Seer prints a **sparse control-and-call outline** of source code, then diffs those outlines. It is not an AST dump, not a type-aware call graph, and not a pretty-printer. The outline shows function/method definitions, control-flow headers, and call sites. Local callees are expanded in place; external library calls appear as leaves; logging/debug APIs are omitted.
 
-v1 is a Rust-only CLI (`seer`) built on tree-sitter. It must work on git blobs and dirty worktrees without compiling the target project. Delivery order is fixed: **tree → tree-diff → commit-diff → default dirty-vs-HEAD**.
+v1 is a CLI (`seer`) for Rust, Java, and TypeScript, built on tree-sitter. It must work on git blobs and dirty worktrees without compiling the target project. Delivery order was **tree → tree-diff → commit-diff → default dirty-vs-HEAD**.
 
 Success is not aesthetic. Success is byte-identical stdout against the golden fixtures in [Verification](#verification), plus the listed `cargo test` commands exiting 0.
 
@@ -86,16 +84,17 @@ Pain of alternatives: rust-analyzer needs a working sysroot and is slow on histo
 | Path-qualified local modules | Last segment is the fn name; prefix must map to a module in the analyzed set | `foo::bar()` expands when `foo.rs` defines free `bar`. `crate`/`self`/`super` remap first. `Item::valid` is not a module → leaf. |
 | UFCS / associated paths | Free calls, not methods. v1 leaves them | `Item::valid(item)` and `Self::new()` never use method uniqueness. |
 | DAG expand | Re-expand a callee at every call site | The outline is the interprocedural view. Pathological diamonds are unbounded. Locked by `diamond`. |
-| File tree roots | Entry functions only (see [Entry functions](#entry-functions)) | The normative file contains `process` and `handle` but prints only `fn process`. |
-| Diff | Unified diff, 3 lines of context, no timestamps | Standard, testable, pipeable. Exit 0/1 like `diff`. |
-| Exit codes | `0` ok / no diff, `1` diffs, `2` usage, `3` runtime | Separates “no changes” from errors. |
+| File tree roots | Entry functions only (see [Entry functions](#entry-functions)) | The normative file contains `process` and `handle` but prints only the `process` root, with `handle` under the call. |
+| Locations | Tree: `path:line` on `fn` roots and resolved calls. Flow/diff: `path` only (no line) | Agents jump from tree output. Diffs stay quiet when an edit only shifts lines. |
+| Diff | Unified diff, 3 lines of context, no timestamps | Standard, testable, pipeable. Exit 0 even when the outlines differ (empty stdout = no change), like `git diff` without `--exit-code`. |
+| Exit codes | `0` ok (including a printed diff), `2` usage, `3` runtime | Agents treat exit 1 as a crash. Empty stdout is the “no change” signal. |
 | Default argv | `seer` with no args ≡ `seer diff` (WORKTREE vs HEAD) | Product op 4. |
 | Stdin | `seer -` and `seer tree -` read stdin as `<stdin>` | Path `-` is never a filesystem path. |
-| Git access | `git` CLI (`ls-tree`, `show`, `rev-parse --show-toplevel`) | No libgit2. Collect from worktree root, not cwd. |
+| Git access | `git` CLI (`ls-tree`, `cat-file --batch`, `rev-parse --show-toplevel`) | No libgit2. Collect from worktree root, not cwd. Pathspecs canonicalize so a symlink cwd still maps into the worktree. |
 | Cargo.toml | **Not read in v1** | All goldens and git cases are sourceless of cargo. Dep/package-name resolve is Open Question 4. |
 | Crate layout | Single package `seer` at repo root | Greenfield small CLI; workspace split is premature. |
-| Color | Never in v1, including clap help | `ColorChoice::Never`. Tests forbid ESC in `--help`. |
-| Multi-file headers | No `file path` lines in v1 | The normative format has none. Roots sorted by `(path, start_byte)`. |
+| Color | Never in `seer` stdout, including help | Tests forbid ESC in `--help`. `seer-view` may color a TTY. |
+| `--max-lines N` | Cap stdout; append `... truncated (N/M lines; pass a path or raise --max-lines)` | Agents have a size knob. Default is unlimited. Does not cap `--help` / `--version`. |
 
 ---
 
@@ -137,23 +136,23 @@ Cargo.toml
 Cargo.lock              # commit it
 rustfmt.toml
 src/main.rs             # argv → seer::run → stdout/stderr/exit
-src/lib.rs              # public: run, outline_files, diff_text
-src/cli.rs              # clap
+src/lib.rs              # public: run, outline_files, outline_diff, diff_text
+src/cli.rs              # parse Cmd (no clap)
 src/error.rs            # SeerError + exit codes
-src/collect.rs          # file walk, stdin, exclusions
+src/collect.rs          # file walk, stdin
 src/parse.rs            # tree-sitter parse → Tree
-src/ir.rs               # Outline / RawNode / FnDef / FnId
+src/ir.rs               # Outline / loc / Label / RawNode / FnDef / FnId / print
 src/extract.rs          # CST → unexpanded RawNode per function
 src/omit.rs             # omit list matching
-src/resolve.rs          # name + use resolve
-src/expand.rs           # interprocedural expand + recursion mark
-src/entry.rs            # entry-function selection
-src/print.rs            # Outline → String
+src/resolve.rs          # name + use resolve, expand, outline
 src/collapse.rs         # whitespace collapse outside literals
 src/diff.rs             # unified diff
-src/git.rs              # git CLI wrapper
+src/git.rs              # rev-parse, ls-tree, cat-file --batch
+src/bin/seer-view.rs    # side-by-side colored seer diff
 src/lang/mod.rs
 src/lang/rust.rs        # node-kind table + header reconstruction
+src/lang/java.rs
+src/lang/typescript.rs
 tests/fixtures.rs       # golden tree + diff
 tests/cli.rs            # binary argv / exit codes
 tests/git.rs            # temp-repo commit and dirty tests
@@ -175,11 +174,11 @@ description = "Control-and-call outlines of source code"
 repository = "https://github.com/MajorScruffy/seer"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 tree-sitter = "0.25"       # 0.25.x as of 2026-08; 0.25.10 known good with rust 0.24.2
 tree-sitter-rust = "0.24"  # 0.24.x as of 2026-08; 0.24.2 known good
 tree-sitter-java = "0.23"
 tree-sitter-typescript = "0.23"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "all-widgets"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -259,13 +258,33 @@ pub struct Outline {
 }
 
 #[derive(Clone, Debug)]
+pub struct Loc {
+    pub file: String,
+    pub line: usize, // 1-based
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Label {
+    Jump, // path:line
+    Flow, // path
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Expand {
+    Every, // re-expand at every call site (tree)
+    Once,  // each callee once (flow/diff)
+}
+
+#[derive(Clone, Debug)]
 pub struct OutlineNode {
     pub text: String,
+    /// Set on entry `fn` roots and resolved calls. Print prefixes; expand does not format.
+    pub loc: Option<Loc>,
     pub children: Vec<OutlineNode>,
 }
 ```
 
-There is one printed form for every node: `text` at its indent. Function roots use `fn {name}`. Control and calls use the reconstructed / collapsed snippet. Recursion appends ` [recursive]` to the call text (one space before `[`).
+There is one printed form for every node: indent + optional location prefix + `text`. Function roots use `fn {name}` as `text` with `loc` set. Resolved calls use the call snippet as `text` with `loc` from the def. `print_outline(outline, Label::Jump)` prefixes `path:line `; `print_outline(outline, Label::Flow)` prefixes `path `. Nodes with no `loc` (control, nested `fn`, unresolved calls) print `text` only. Recursion appends ` [recursive]` to the call text (one space before `[`).
 
 Unexpanded extraction uses a parallel `RawNode` that carries resolve keys (not printed):
 
@@ -295,7 +314,7 @@ pub enum CallKind {
 
 For `Free { path }`, `path` is the callee path segments in source (or after splitting a `scoped_identifier`), e.g. `["handle"]`, `["serde_json", "to_string"]`, `["std", "fs", "write"]`, `["crate", "other", "handle"]`. Macro names do not include `!` in `path`’s last segment; `is_macro = true` instead.
 
-**Check:** Unit tests construct an `Outline` and assert `print.rs` output byte-for-byte (see [Printer](#printer)).
+**Check:** Unit tests construct an `Outline` and assert `ir::print_outline` output byte-for-byte (see [Printer](#printer)).
 
 ### Classification of `function_item`
 
@@ -328,7 +347,7 @@ Home of this table: **this section**. Other sections reference it; they do not r
 | `break_expression` | Emit collapsed full node. **Do not** walk the value. |
 | `continue_expression` | Emit collapsed full node. |
 | `try_block` | Emit `try`. Walk the inner `block`. |
-| `call_expression` | If not omitted: emit one call node. **Do not** walk `function` or `arguments` for additional call/control nodes. |
+| `call_expression` | If not omitted: emit one call node. Then walk `arguments` (sibling call/control nodes after the outer call, source order). **Do not** walk `function` (callee / receiver). Tuple-struct / enum-variant constructors (`Some(x)`) emit no call node but still walk `arguments`. If the outer call is omitted, still walk `arguments`. |
 | `macro_invocation` | If not omitted: emit one call node. **Do not** walk `token_tree` for calls. |
 | `let_declaration` | Emit nothing. Walk `value` (if any) with the full walker. Walk `alternative` (let-else block) with the full walker. No `let` line. |
 | `expression_statement` | Walk the inner expression. |
@@ -340,9 +359,9 @@ Home of this table: **this section**. Other sections reference it; they do not r
 | `ERROR` | Skip. |
 | Any other kind | Walk named children. Do not emit a node. |
 
-**Call-in-statement vs call-in-header.** A `call_expression` inside an `if`/`while` condition, `for` header, `match` scrutinee, match-arm guard, or inside another call’s callee/arguments is **not** visited by the walker (those subtrees are not walked). A `call_expression` that is a `let` value, an expression statement, an if/loop/match **body**, an assignment RHS, or a closure body **is** visited.
+**Call-in-statement vs call-in-header.** A `call_expression` inside an `if`/`while` condition, `for` header, `match` scrutinee, match-arm guard, or another call’s callee (`function` field) is **not** visited. A `call_expression` in another call’s **arguments** is visited: `wrap(inner())` emits `wrap(inner())` then `inner()` as siblings under the caller. A `call_expression` that is a `let` value, an expression statement, an if/loop/match **body**, an assignment RHS, or a closure body **is** visited. Java `method_invocation` / `object_creation_expression` and TypeScript `call_expression` / `new_expression` walk `arguments` the same way. Macros still do not walk `token_tree`.
 
-**Check:** `tests/fixtures/tree/call_in_let` prints the `let` RHS call. `tests/fixtures/tree/process_handle` does **not** print `items.is_empty()`, `item.valid()`, or `item.ready()` as their own nodes. `tests/fixtures/tree/headers_keep_std_and_skip_calls` does **not** print `items.iter()` or `compute()` as call nodes.
+**Check:** `tests/fixtures/tree/call_in_let` prints the `let` RHS call. `tests/fixtures/tree/call_in_args` prints `wrap(inner())` then expands `inner()`. `tests/fixtures/tree/process_handle` does **not** print `items.is_empty()`, `item.valid()`, or `item.ready()` as their own nodes. `tests/fixtures/tree/headers_keep_std_and_skip_calls` does **not** print `items.iter()` or `compute()` as call nodes.
 
 #### If / else-if / else
 
@@ -599,13 +618,14 @@ expand_fn(def, stack) -> Vec<OutlineNode>:
     return nodes
 
 expand_raw(raw, stack) -> Vec<OutlineNode> | OutlineNode:
-    Control/NestedFn: copy text; children = flatten expand_raw of children
+    Control/NestedFn: copy text; loc = none; children = flatten expand_raw of children
     Call:
         text = site.display
         target = resolve(site)   # uses site.file
-        if no target: return node(text, [])
-        if target.id in stack: return node(text + " [recursive]", [])
-        return node(text, expand_fn(target, stack))
+        if no target: return node(text, loc=none, [])
+        loc = target's file + start_line
+        if target.id in stack: return node(text + " [recursive]", loc, [])
+        return node(text, loc, expand_fn(target, stack))
 ```
 
 The stack is keyed by `FnId` (file + start_byte), not by name. It is a **path** stack, not a global “already expanded” set.
@@ -613,6 +633,8 @@ The stack is keyed by `FnId` (file + start_byte), not by name. It is a **path** 
 When printing an **entry** function, push that function’s id before expanding its body so a self-call is marked `[recursive]`.
 
 **Re-expand (normative):** the same callee called twice sequentially is expanded twice (the first expand pops before the second). A diamond `a→b, a→c, b→d, c→d` prints `d`’s body in full under both `b()` and `c()`. v1 does **not** mark-once. Pathological DAGs can make the outline much larger than the source; there is no size cap. That is accepted.
+
+**Tree vs flow.** `outline(index, Expand::Every)` is this algorithm (tree). `outline(index, Expand::Once)` expands each callee once; later sites are located leaves. Once-mode roots sort by `(file, name, start_byte)` so a move inside a file is quiet. `outline_files` prints Every with `Label::Jump`. `outline_diff` prints Once with `Label::Flow`.
 
 **Check:** `tests/fixtures/tree/recursive`. `tests/fixtures/tree/diamond` reprints `d` twice. `call_in_let` expands `compute` twice.
 
@@ -634,27 +656,31 @@ Print entries only, as roots, in order of `(file path, start_byte)` (byte order 
 ### Printer
 
 - Indent: two ASCII spaces per depth. No tabs. No box-drawing (`│├└─` forbidden).
-- Line: `indent + node.text` with **no trailing whitespace**.
+- Line: `indent + location prefix + node.text` with **no trailing whitespace**. Prefix is empty when `loc` is none; else `Label::Jump` → `path:line `, `Label::Flow` → `path `.
 - Each printed line ends with `\n` (LF only, including on Windows).
 - Between two **roots**, emit one extra `\n` (one blank line).
 - After the last line of the last root, stop (exactly one `\n` at EOF, no trailing blank line).
 - Empty outline (`roots` empty): empty string, **zero bytes**.
 - Encoding: UTF-8, no BOM.
-- No color, no timestamps, no file-path headers, no line numbers.
+- No color, no timestamps, no extra file-path headers.
 
 ```
-print(outline) -> String:
+print_outline(outline, label) -> String:
     if outline.roots is empty: return ""
     parts = []
     for i, root in enumerate(outline.roots):
         if i > 0: parts.push("\n")
-        emit(root, depth=0, parts)
+        emit(root, depth=0, parts, label)
     return join(parts)
 
-emit(node, depth, parts):
-    parts.push(" " * (2 * depth) + node.text + "\n")
+emit(node, depth, parts, label):
+    line = node.text
+    if node.loc:
+        if label is Jump: line = "{file}:{line} " + text
+        if label is Flow: line = "{file} " + text
+    parts.push(" " * (2 * depth) + line + "\n")
     for child in node.children:
-        emit(child, depth+1, parts)
+        emit(child, depth+1, parts, label)
 ```
 
 **Check:** Every tree fixture’s `expected.txt` is compared as raw bytes to this printer’s output.
@@ -688,43 +714,35 @@ This is a new binary. There is no previous CLI.
 ### Argv (normative)
 
 ```
-seer [--help] [--version]
+seer [--help] [--version] [--max-lines N]
 seer <PATH>
 seer tree [PATH]
-seer diff [REV] [REV]
+seer diff [REV] [REV] [--] [PATH...]
+seer -- [PATH...]
 seer diff-trees <A> <B>
 ```
 
-**Parse strategy (normative).** Do **not** use an optional `#[command(subcommand)]` plus a sibling positional `path` — clap 4 will treat `seer tests/foo.rs` as an unrecognized subcommand (exit 2) and fail `cli_tree_bare_path`.
-
-First-token dispatch in `run` / `cli.rs` (after `argv[0]`):
+**Parse strategy (normative).** `src/cli.rs` strips `--max-lines` / `--max-lines=N` from any position after argv0, then first-token dispatch into `Cmd`. There is no clap. Help/version are `Cmd` variants and never pass through the stdout cap. `seer tests/foo.rs` is tree mode (a path), not an unknown subcommand.
 
 ```
-let rest = &args[1..];
-match rest.first().map(|s| s.as_str()) {
-    Some("-h" | "--help")    => clap help for the root command, exit 0
-    Some("-V" | "--version") => clap version, exit 0
-    Some("tree")       => parse remaining with TreeArgs (path optional)
-    Some("diff")       => parse remaining with DiffArgs (0..=2 revs)
-    Some("diff-trees") => parse remaining with DiffTreesArgs (two paths)
+enum Cmd {
+    Help, Version,
+    Tree { path: Option<String>, max_lines: Option<usize> },
+    Diff { revs: Vec<String>, paths: Vec<String>, max_lines: Option<usize> },
+    DiffTrees { a: String, b: String, max_lines: Option<usize> },
+}
+
+let rest = strip_max_lines(&args[1..]);
+match rest.first() {
+    Some("-h" | "--help")    => Cmd::Help
+    Some("-V" | "--version") => Cmd::Version
+    Some("tree")       => remaining path optional
+    Some("diff")       => 0..=2 revs, optional `--` path filters
+    Some("diff-trees") => two paths
+    Some("--")         => git WORKTREE vs HEAD, path filters
     Some(_)            => tree mode; path = rest[0]; extra tokens → exit 2
     None               => git WORKTREE vs HEAD
 }
-```
-
-`seer -` therefore hits `Some("-")` and is tree-of-stdin (`FnId.file = "<stdin>"`), not a flag.
-
-Clap may still derive **per-subcommand** structs. The following root derive is **non-normative** (documentation only); if used, it must not be the sole parser for `seer <PATH>`:
-
-```rust
-#[derive(Parser)]
-#[command(
-    name = "seer",
-    version,
-    about = "Control-and-call outlines of source code",
-    color = clap::ColorChoice::Never, // required; never color help/version
-)]
-struct TreeArgs { /* used only after first token is `tree` */ }
 ```
 
 Dispatch (behavior table):
@@ -740,13 +758,17 @@ Dispatch (behavior table):
 | `seer diff` | Git: WORKTREE vs `HEAD` |
 | `seer diff REV` | Git: WORKTREE vs `REV` (like `git diff REV`) |
 | `seer diff REV1 REV2` | Git: outline(`REV1`) vs outline(`REV2`) (old → new) |
+| `seer -- PATH...` / `seer diff -- PATH...` | Same as `seer diff`, files limited to those path filters (cwd-relative, like git) |
+| `seer diff REV1 REV2 -- PATH...` | Two-rev outline-diff, path-limited |
 | `seer diff-trees A B` | Diff file `A` vs file `B` as outline **text** (do not re-parse as Rust) |
-| `seer --help` / `seer --version` | clap default, exit 0 |
-| `seer diff a b c` | exit 2 (too many revs) |
+| `seer --help` / `seer --version` | hardcoded HELP / `seer <version>`, exit 0 |
+| `seer diff a b c --` | exit 2 (too many revs) |
 
 Subcommand names win over paths: `seer diff` is never “tree the file named `diff`”. Use `seer ./diff` to outline a file named `diff`.
 
-v1 flags: **none** besides clap’s `--help` / `--version`. Do not add `--format`, `--depth`, `--color`, or `--ignore`.
+v1 flags: `--help` / `--version` / `--max-lines N`. Do not add `--format`, `--depth`, `--color`, or `--ignore`. `--max-lines` may appear anywhere after argv0 (`--max-lines 80` or `--max-lines=80`). N must be ≥ 1. `--max-lines` does not cap `--help` / `--version` (including `seer tree --help`).
+
+`seer -` hits `Some("-")` and is tree-of-stdin (`FnId.file = "<stdin>"`), not a flag.
 
 ### PATH behavior
 
@@ -771,8 +793,9 @@ Revisions must satisfy `git rev-parse --verify --end-of-options <rev>^{commit}` 
 
 **Files per side:**
 
-- Revision side: `git ls-tree -r --name-only <rev>` filtered to collected `.rs` paths (same exclusion rules on each path component). Content: `git show <rev>:<path>` (bytes → UTF-8).
-- WORKTREE side: collect `.rs` from `--show-toplevel` on disk, **including untracked** files that pass collect rules. Content: working-tree bytes (includes unstaged edits). A file present in HEAD but deleted on disk is absent from WORKTREE (empty contribution).
+- Revision side: `git ls-tree -r --name-only --full-tree <rev> [-- PATH...]` filtered to collected source paths (same exclusion rules on each path component). Content: one `git cat-file --batch` of `<rev>:<path>` names (bytes → UTF-8). Do not `git show` once per file.
+- WORKTREE side: collect source files from `--show-toplevel` on disk, **including untracked** files that pass collect rules. Content: working-tree bytes (includes unstaged edits). A file present in HEAD but deleted on disk is absent from WORKTREE (empty contribution).
+- Pathspecs are cwd-relative, then mapped under `--show-toplevel`. Canonicalize cwd and toplevel (and existing spec paths) so a symlink worktree does not report `path outside worktree`.
 - Union of paths is not required as a separate pass: each side is outlined independently from its own analyzed set. Expansion on each side uses only that side’s files.
 - Do **not** read `Cargo.toml` from either side (v1).
 
@@ -782,21 +805,20 @@ Revisions must satisfy `git rev-parse --verify --end-of-options <rev>^{commit}` 
 
 | Code | Meaning |
 |---:|---|
-| 0 | Success. Tree printed (including empty). Help/version. Diff with **no** changes (stdout empty). |
-| 1 | Diff mode (including default `seer`) and the outlines differ. Stdout is the diff. **Not** an error. |
-| 2 | Usage error (clap, `seer tree` on a tty with no path, too many revs). |
+| 0 | Success. Tree printed (including empty). Help/version. Diff with no changes (stdout empty) **or** a printed diff. |
+| 2 | Usage error (`seer tree` on a tty with no path, too many revs, bad `--max-lines`). |
 | 3 | Runtime failure: IO, invalid UTF-8, path not found, unsupported language, not a git repo, invalid rev, git command failed. |
 
-`main` prints `error: …` to **stderr** for codes 2–3 (clap owns usage text for its own errors). **Stdout is only** the outline or the diff (or help/version).
+`main` prints `error: …` to **stderr** for codes 2–3. **Stdout is only** the outline or the diff (or help/version), plus an optional truncation line.
 
-**Check:** `tests/cli.rs` asserts these codes. Diff-no-change → 0 and empty stdout. Diff-change → 1 and fixture bytes.
+**Check:** `tests/cli.rs` asserts these codes. Diff-no-change → 0 and empty stdout. Diff-change → 0 and fixture bytes.
 
 ### Determinism
 
 - Same input bytes + same analyzed set → identical stdout bytes.
 - LF newlines only.
 - No ANSI, no timestamps, no locale-dependent numbers or dates.
-- Ignore `NO_COLOR` / `TERM` (never color). Set `#[command(color = clap::ColorChoice::Never)]` (or equivalent) on every clap `Command` so `--help` / `--version` emit no ESC even on a TTY.
+- Ignore `NO_COLOR` / `TERM` (never color). `--help` / `--version` are hardcoded strings with no ESC.
 - Do not print progress.
 
 **Check:** Running any tree fixture twice and hashing stdout yields one hash. `cli_help_no_ansi` asserts `--help` stdout contains no `0x1b` byte.
@@ -813,16 +835,18 @@ pub fn run(args: &[String]) -> Result<RunOutput, SeerError> {
 }
 
 /// `stdin_is_terminal` is injected so `cli_tree_no_path_tty` does not need a pty.
-pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, SeerError> { /* first-token dispatch */ }
+pub fn run_with(args: &[String], stdin_is_terminal: bool) -> Result<RunOutput, SeerError> { /* parse Cmd; cap stdout except help/version */ }
 
 pub struct RunOutput {
     pub stdout: String,
-    pub exit: i32, // 0 or 1
+    pub exit: i32, // 0 on success
 }
 
 /// `files` is (posix_relpath, rust_source_utf8). Sorted here if needed.
 /// Does **not** read the disk and does **not** take Cargo.toml bytes (v1).
-pub fn outline_files(files: &[(String, String)]) -> String { /* empty → "" */ }
+pub fn outline_files(files: &[(String, String)]) -> String {
+    print_outline(outline(&index_files(files), Expand::Every), Label::Jump)
+}
 
 /// Unified diff. Empty string iff `a == b`.
 pub fn diff_text(a: &str, b: &str, name_a: &str, name_b: &str) -> String {}
@@ -969,7 +993,7 @@ Rejected. Omit is logging/debug only. Methods expand on unique name.
 | Executing outlined code | High if it happened | Never compile or run input. tree-sitter only. |
 | Path traversal writes | Medium | Seer writes only to stdout/stderr. No output files. |
 | Secrets in source appear in outlines | Medium | Call arguments are copied as text. Do not log, upload, or network. Document that outlines may contain literals. |
-| `git show` of unexpected revisions | Low | Only user-supplied revs; no hooks invoked beyond what `git show`/`ls-tree` do. |
+| `git cat-file` of unexpected revisions | Low | Only user-supplied revs; no hooks invoked beyond what `git cat-file`/`ls-tree` do. |
 | Malicious huge files / deep recursion | Medium | Cycles are bounded by the expand **path** stack (`FnId`). DAG re-expand is unbounded; accepted, no cap. |
 | Command injection via rev | Medium | Pass revs as a single argv element to `git`; never interpolate into a shell. Use `Command::new("git").args([...])`. |
 
@@ -983,7 +1007,7 @@ v1 has no metrics, tracing, or `RUST_LOG`.
 
 | Channel | Content |
 |---|---|
-| stdout | Outline or unified diff only (or clap help/version) |
+| stdout | Outline or unified diff only (or hardcoded help/version) |
 | stderr | `error: …` on failures |
 
 Suggested later (not v1): counters for files parsed, calls expanded, resolve-miss, elapsed ms.
@@ -1002,11 +1026,7 @@ New public tool. No feature flags.
 | 0.1.0 (same if in one train) | `diff-trees` |
 | 0.1.0 | `diff` + default dirty-vs-HEAD |
 
-PRs merge in the order in [PR Plan](#pr-plan). Each PR is independently releasable in the sense that `cargo test` stays green; the user-facing command set grows.
-
-**Rollback:** revert the PR. No data migration. No flag.
-
-**CI (when added):** GitHub Actions, `ubuntu-latest`, stable Rust, `cargo test`, git preinstalled, no network in the test step (`cargo test --offline` after a cached `cargo fetch` in a prior step).
+**CI:** GitHub Actions, `ubuntu-latest`, stable Rust, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --offline` after a cached `cargo fetch`. Git is preinstalled.
 
 ---
 
@@ -1031,8 +1051,8 @@ Java and TypeScript are implemented (see omit table, collect extensions, goldens
 Only items **not** decided by the product conversation. Do not treat these as an invitation to change decided items (tree-sitter, outline shape, omit logs not clone, expand local only, show external leaves, no box-drawing, Rust first).
 
 1. **User `--ignore` / config file format** for extending the omit list. v1 is hardcoded. Defer.
-2. **`--depth` and `--format`.** Defer. No flags in v1.
-3. **File-path headers** in multi-file / git outlines. v1 prints none (see Key Decisions). Revisit if commit diffs prove unreadable.
+2. **`--depth` and `--format`.** Defer. No `--format` on tree or diff.
+3. **File-path headers** in multi-file / git outlines. **Decided:** tree prints `path:line` on `fn` roots and resolved calls; flow/diff prints `path` without the line so a line-only shift is quiet.
 4. **Reading the target `Cargo.toml`.** v1 does not. Deferred: `[package].name` as a local prefix, `[dependencies]` (including `foo-bar` vs `foo_bar`), workspace members, and per-side blob `Cargo.toml` for `seer diff REV1 REV2`. Until then, only `std`/`core`/`alloc`/`proc_macro`/`test` plus existing module paths are known; `serde_json::…` is an external leaf.
 5. **Block-scoped `use` and `#[cfg]`-gated duplicates.** v1 is file-scoped uses and all fns visible.
 
@@ -1046,7 +1066,7 @@ Agents must not judge “looks right.” A change is done when the commands in [
 
 `tests/fixtures.rs`:
 
-- Discover each directory `tests/fixtures/tree/<name>/`. **PR 4a:** iterate only the whitelist `{empty_file, types_only, if_else_if_else, loops, two_entries}` (ignore any other dir). **PR 4b and later:** every directory, no whitelist.
+- Discover each directory `tests/fixtures/tree/<name>/` (no whitelist).
 - Input:
   - If `input.rs` / `input.java` / `input.ts` / `input.tsx` exists: `outline_files(&[("<filename>", contents)])`.
   - Else if `input/` exists: collect source files recursively (same sort/exclude as production), paths relative to `input/`, then `outline_files`.
@@ -1076,40 +1096,26 @@ Non-empty `expected.txt` files **end with exactly one trailing `\n`** and use LF
 From the repo root:
 
 ```
-cargo test
-cargo test --lib
-cargo test --test fixtures
-cargo test --test cli
-cargo test --test git
-```
-
-**Green** means each command exits 0. `cargo test` runs lib + integration tests and is sufficient.
-
-Optional later (not required to merge tree PRs unless that PR adds them):
-
-```
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
+cargo test
 ```
+
+**Green** means each command exits 0. `cargo test` runs lib + integration tests. CI runs all three.
 
 Do not use `--nocapture` as a pass condition. Fixture failures must be readable without it (assert message contains the unified diff).
 
 ### Per-PR acceptance
 
-Listed under each PR in [PR Plan](#pr-plan). A PR is not mergeable if its listed commands fail.
+Historical PR tickets are under [PR Plan](#pr-plan). New work is mergeable when `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` exit 0.
 
 ---
 
 ### Normative tree fixtures
 
-Copy these **verbatim** into the repo, **by PR** (see [PR Plan](#pr-plan)):
+Each `tests/fixtures/tree/<name>/` directory is a required golden. `tests/fixtures.rs` discovers every such directory.
 
-- **PR 4a only:** `empty_file`, `types_only`, `if_else_if_else`, `loops`, `two_entries`. Do **not** add any other `tests/fixtures/tree/<name>/` directory in that PR.
-- **PR 4b:** copy the rest of this catalog. Do not copy them in 4a.
-
-`tests/fixtures.rs` in PR 4a **must whitelist** those five names so a premature full-catalog copy cannot fail 4a. PR 4b removes the whitelist (discover every `tests/fixtures/tree/<name>/`).
-
-Catalog (every row is a required golden by the end of PR 4b):
+Catalog:
 
 | Directory | Locks |
 |---|---|
@@ -1129,6 +1135,7 @@ Catalog (every row is a required golden by the end of PR 4b):
 | `ufcs_leaf` | `Item::valid(item)` is a free-path leaf |
 | `omit_logging` | print/log/tracing gone; local `info` stays |
 | `call_in_let` | let-RHS calls appear |
+| `call_in_args` | `wrap(inner())` emits both calls; `inner` is not an entry |
 | `macros_stay` | todo/assert/format/vec/unwrap |
 | `two_entries` | blank line between roots |
 | `cycle_fallback` | mutual recursion, both printed as entries |
@@ -1163,12 +1170,12 @@ fn handle(item: &Item) {
 #### `tests/fixtures/tree/process_handle/expected.txt`
 
 ```
-fn process
+input.rs:1 fn process
   if items.is_empty()
     return
   for item in items
     if item.valid()
-      handle(item)
+      input.rs:13 handle(item)
         if !item.ready()
           return
         serde_json::to_string(item)
@@ -1327,7 +1334,10 @@ fn walk(node: &Node) {
 fn walk
   if node.has_child()
     walk(node.child()) [recursive]
+    node.child()
 ```
+
+`node.child()` in the argument list is its own call node. `node.has_child()` stays on the `if` line.
 
 ---
 
@@ -1503,6 +1513,36 @@ fn f
   compute()
     return
 ```
+
+---
+
+#### `tests/fixtures/tree/call_in_args/input.rs`
+
+```rust
+fn outer() {
+    wrap(inner());
+}
+
+fn wrap(_x: i32) {
+    return;
+}
+
+fn inner() -> i32 {
+    return 1;
+}
+```
+
+#### `tests/fixtures/tree/call_in_args/expected.txt`
+
+```
+input.rs:1 fn outer
+  input.rs:5 wrap(inner())
+    return
+  input.rs:9 inner()
+    return 1
+```
+
+`inner` is not a column-0 entry: the argument call is a real site, so `inner` is in `called`.
 
 ---
 
@@ -2050,13 +2090,13 @@ fn main() {
 ```
 
 4. Run `seer` with no args in the repo (also run `seer diff`).
-5. **Expect exit code 1** and stdout **exactly**:
+5. **Expect exit code 0** and stdout **exactly**:
 
 ```
 --- HEAD
 +++ WORKTREE
 @@ -1,2 +1,3 @@
- fn main
+ src.rs fn main
 -  return
 +  if true
 +    return
@@ -2068,13 +2108,13 @@ fn main() {
 
 Starting from the committed `git_dirty_vs_head` repo after step 6 (or an equivalent two-commit history):
 
-- `seer diff HEAD~1 HEAD` → exit 1, stdout:
+- `seer diff HEAD~1 HEAD` → exit 0, stdout:
 
 ```
 --- HEAD~1
 +++ HEAD
 @@ -1,2 +1,3 @@
- fn main
+ src.rs fn main
 -  return
 +  if true
 +    return
@@ -2123,16 +2163,16 @@ fn extra
   return
 ```
 
-Expected stdout (exit 1):
+Expected stdout (exit 0):
 
 ```
 --- HEAD
 +++ WORKTREE
 @@ -1,2 +1,5 @@
- fn main
+ a.rs fn main
    return
 +
-+fn extra
++b.rs fn extra
 +  return
 ```
 
@@ -2162,15 +2202,15 @@ fn main() {
 3. Run `seer` with `current_dir = <repo>` (clean) → exit 0, stdout empty.
 4. Run `seer` with `current_dir = <repo>/src` (still clean) → **exit 0, stdout empty**, identical to step 3.
 
-An implementation that collects WORKTREE from `cwd` will outline only `main.rs` on the worktree side and both files on HEAD → exit 1 and fail this case.
+An implementation that collects WORKTREE from `cwd` will outline only `main.rs` on the worktree side and both files on HEAD → non-empty stdout and fail this case.
 
-5. Overwrite `src/main.rs` with `if true { return; }` as in `git_dirty_vs_head`. Run `seer` from `<repo>/src` and from `<repo>`. Both must exit 1 with **identical** stdout (headers `HEAD` / `WORKTREE`).
+5. Overwrite `src/main.rs` with `if true { return; }` as in `git_dirty_vs_head`. Run `seer` from `<repo>/src` and from `<repo>`. Both must exit 0 with **identical** stdout (headers `HEAD` / `WORKTREE`).
 
 #### Case `git_diff_one_rev`
 
 Using the dirty repo from `git_dirty_vs_head` after step 3 (dirty, not committed):
 
-- `seer diff HEAD` → exit 1, stdout **byte-identical** to no-args `seer` on that repo (headers `HEAD` / `WORKTREE`). The one-rev form is WORKTREE vs the given rev; when the rev is `HEAD` there is no header difference.
+- `seer diff HEAD` → exit 0, stdout **byte-identical** to no-args `seer` on that repo (headers `HEAD` / `WORKTREE`). The one-rev form is WORKTREE vs the given rev; when the rev is `HEAD` there is no header difference.
 
 #### Case `git_invalid_rev`
 
@@ -2184,18 +2224,19 @@ Use `std::process::Command` + `CARGO_BIN_EXE_seer`. Each row is a required `#[te
 
 | Test name | Command | stdin | cwd | Expect |
 |---|---|---|---|---|
-| `cli_tree_subcommand` | `seer tree tests/fixtures/tree/process_handle/input.rs` | none | repo root | exit 0, stdout = process_handle `expected.txt` |
+| `cli_tree_subcommand` | `seer tree tests/fixtures/tree/process_handle/input.rs` | none | repo root | exit 0, stdout = outline of that argv path |
 | `cli_tree_bare_path` | `seer tests/fixtures/tree/empty_file/input.rs` | none | repo root | exit 0, stdout empty |
-| `cli_tree_stdin_piped` | `seer tree` | process_handle `input.rs` piped | repo root | exit 0, stdout = process_handle expected |
-| `cli_tree_dash` | `seer -` | process_handle `input.rs` piped | repo root | exit 0, stdout = process_handle expected |
+| `cli_tree_stdin_piped` | `seer tree` | process_handle `input.rs` piped | repo root | exit 0, stdout = outline of `<stdin>` |
+| `cli_tree_dash` | `seer -` | process_handle `input.rs` piped | repo root | exit 0, stdout = outline of `<stdin>` |
 | `cli_tree_directory` | `seer tree tests/fixtures/tree/name_collision/input` | none | repo root | exit 0, stdout = name_collision `expected.txt` |
 | `cli_tree_empty_dir` | `seer tree <temp empty dir>` | none | repo root | exit 0, stdout empty |
 | `cli_tree_unsupported` | `seer tree <temp `x.js`>` | none | repo root | exit 3, stderr contains `unsupported language` |
 | `cli_tree_missing` | `seer tree /no/such/file.rs` | none | repo root | exit 3, stderr starts with `error:` |
-| `cli_diff_trees_simple` | `seer diff-trees tests/fixtures/diff/simple/a.txt tests/fixtures/diff/simple/b.txt` | none | repo root | exit 1, stdout = **CLI** expected below (not `simple/expected.txt`) |
+| `cli_diff_trees_simple` | `seer diff-trees tests/fixtures/diff/simple/a.txt tests/fixtures/diff/simple/b.txt` | none | repo root | exit 0, stdout = **CLI** expected below (not `simple/expected.txt`) |
 | `cli_diff_trees_identical` | `seer diff-trees tests/fixtures/diff/identical/a.txt tests/fixtures/diff/identical/b.txt` | none | repo root | exit 0, stdout empty |
-| `cli_help_no_ansi` | `seer --help` | none | anywhere | exit 0; stdout contains no `0x1b` byte |
+| `cli_help_no_ansi` | `seer --help` | none | anywhere | exit 0; stdout contains no `0x1b` byte; contains `--max-lines` and the sample tree |
 | `cli_version` | `seer --version` | none | anywhere | exit 0; stdout contains no `0x1b` byte |
+| `cli_max_lines_truncates` | `seer --max-lines 3 tree tests/fixtures/tree/process_handle/input.rs` | none | repo root | exit 0; truncation line present |
 
 **`cli_diff_trees_simple` stdout** (argv paths as headers; hunk identical to the library golden):
 
@@ -2226,6 +2267,7 @@ Minimum (all in `cargo test --lib`). Names are required so PR gates can name the
 | `collapse_node_only_three_literal_kinds` | ranges come from `string_literal` / `raw_string_literal` / `char_literal` only |
 | `print_empty` | empty outline → `""` |
 | `print_two_roots` | exact `fn a\n  return\n\nfn b\n  return\n` |
+| `print_jump_and_flow_labels` | `loc` + `Label::Jump` → `path:line`; `Label::Flow` → `path` |
 | `print_indent_and_no_trailing_ws` | depth 0/1/2; no trailing spaces |
 | `omit_each_rust_name` | each Rust omit name dropped |
 | `omit_keeps_local_info` | local `fn info` not omitted |
@@ -2252,11 +2294,11 @@ Minimum (all in `cargo test --lib`). Names are required so PR gates can name the
 | v1 resolve under-expands methods | Medium (accepted) | Unique-name rule; never guess. Document in README later. |
 | `tree-sitter-rust` node names change | Medium | Pin crates; fixtures fail loudly; update `src/lang/rust.rs` in one PR |
 | Diff crate format ≠ `difflib` | Medium | Fixtures are law; wrap the crate |
-| Multi-file outlines without paths are hard to read | Medium (accepted) | Open question 3; v1 stays headerless |
+| Multi-file outlines without paths are hard to read | Low (mitigated) | Tree: `path:line`. Flow/diff: `path` without line. |
 | Huge collapsed macros / strings | Low | Single-line collapse; no wrap |
-| DAG re-expand explodes outline size | Medium (accepted) | Locked by `diamond`. No mark-once. No size cap. Informal perf targets only. |
+| DAG re-expand explodes outline size | Medium (accepted) | Locked by `diamond` for trees. Flow expands each callee once. Informal perf targets only. |
 | `git` CLI missing | Low | Exit 3; CI images have git |
-| Collecting all `.rs` on every dirty diff is slow on giant monorepos | Medium | Collect from toplevel; optimize later (still full-set expand) |
+| Collecting all source on every dirty diff is slow on giant monorepos | Medium | Pathspecs limit `ls-tree`. Unfiltered `seer` still lists the toplevel, then one `git cat-file --batch`. |
 
 ---
 
@@ -2270,90 +2312,11 @@ Minimum (all in `cargo test --lib`). Names are required so PR gates can name the
 
 ---
 
-## PR Plan
+## PR Plan (historical)
 
-Each PR is independently reviewable and mergeable. `cargo test` must stay green after every PR. Later PRs may add tests; they must not break earlier fixtures.
+v1 shipped as PRs 1–8: crate bootstrap, IR/print, parse/extract, collect, resolve/expand, CLI tree, diff-trees, git, CI. That sequence is done.
 
----
-
-### PR 1 — chore: bootstrap the `seer` crate
-
-- **Files / components:** `.gitignore`, `rustfmt.toml`, `Cargo.toml`, `src/main.rs`, `src/lib.rs`, `src/error.rs`. Do not modify `LICENSE`.
-- **Depends on:** none.
-- **Description:** Single-package crate. `seer::run` may return a stub error for all subcommands except `--help`/`--version` if clap is introduced here; alternatively `main` only prints a placeholder and clap waits for PR 5. Prefer introducing clap + exit-code mapping now with unimplemented commands returning exit 3 `error: not implemented` so the binary exists. Add `SeerError` and `RunOutput`.
-- **Verification:** `cargo build` exits 0. `cargo test` exits 0 (zero or smoke tests). `target/debug/seer --help` exits 0 if clap is wired.
-
----
-
-### PR 2 — feat: outline IR, collapse, and printer
-
-- **Files / components:** `src/ir.rs` (including `CallSite.file`), `src/collapse.rs`, `src/print.rs`, unit tests in those modules; `src/lib.rs` exports.
-- **Depends on:** PR 1.
-- **Description:** Implement `Outline` / `OutlineNode`, `collapse(src, literal_ranges)` / `strip_std`, and `print`. No parser. `collapse_node` may wait for PR 3 if it needs `tree_sitter::Node`.
-- **Verification:** `cargo test --lib` filters: `collapse_ws_runs`, `collapse_preserves_string_interior`, `print_empty`, `print_two_roots`, `print_indent_and_no_trailing_ws`, `strip_std_std_fs_write`, `strip_std_serde_unchanged`, `strip_std_core`. `print_two_roots` must assert exact `fn a\n  return\n\nfn b\n  return\n`.
-
----
-
-### PR 3 — feat: parse Rust and extract unexpanded outlines
-
-- **Files / components:** `src/parse.rs`, `src/extract.rs`, `src/lang/mod.rs`, `src/lang/rust.rs`, `src/omit.rs` (syntactic omit only: builtin macros + `log::` / `tracing::` prefixes as written, before resolve), extract unit tests.
-- **Depends on:** PR 2.
-- **Description:** Parse with tree-sitter-rust. Extract per-`function_item` unexpanded bodies using the node table. Reconstruct headers (`return true` not bare `return` when there is a value). Implement `collapse_node`. Do **not** expand or entry-filter yet. Unit tests may print a single function’s raw body (calls as leaves) and compare strings.
-- **Verification:** `cargo test --lib`. Required extract tests (string-equal, one function at a time): if/else-if/else headers; match arms; loop/while/for headers; `let x = compute();` emits `compute()`; `println!` omitted; `todo!` kept; condition calls not emitted; `return true` kept; `if std::fs::exists(p)` keeps `std::`. `collapse_node_only_three_literal_kinds` passes. No golden `tests/fixtures/tree/*` requirement yet.
-
----
-
-### PR 4a — feat: collect + `outline_files` without expand
-
-- **Files / components:** `src/collect.rs`, `outline_files` in `src/lib.rs`, `tests/fixtures.rs` (**whitelist** discover), **only** these goldens: `empty_file`, `types_only`, `if_else_if_else`, `loops`, `two_entries`.
-- **Depends on:** PR 3.
-- **Description:** Disk/batch collect. `outline_files` prints **every non-nested body-bearing `function_item` as a root**, calls as leaves, omit applied syntactically. No resolve, no expand, no entry filter. **Do not add any other `tests/fixtures/tree/<name>/` directory.** The harness whitelist is `{empty_file, types_only, if_else_if_else, loops, two_entries}` so extra dirs cannot fail this PR.
-- **Verification:** `cargo test --test fixtures` green with only those five tree dirs present. `cargo test --lib` still green.
-
----
-
-### PR 4b — feat: resolve, expand, entries, remaining tree goldens
-
-- **Files / components:** `src/resolve.rs`, `src/expand.rs`, `src/entry.rs`, **the rest of** `tests/fixtures/tree/**` from the catalog (every row not in the 4a five, including `process_handle`, `super_self_path`, `cross_file_no_search`, `local_mod_path`, `use_expand`, `method_*`, `ufcs_leaf`, `cycle_fallback`, `nested_fn`, `diamond`, `headers_keep_std_and_skip_calls`, `name_collision`, `omit_logging`, `call_in_let`, `macros_stay`, `match_arms`, `recursive`). Remove the 4a whitelist.
-- **Depends on:** PR 4a.
-- **Description:** Use-maps, module identity (no Cargo.toml), resolve A/B, method uniqueness including signatures, expand path-stack, DAG re-expand, `[recursive]`, entry selection + cycle fallback. Switch `outline_files` to the full pipeline. **This is the first PR allowed to add the remaining tree goldens.**
-- **Verification:** `cargo test --test fixtures` — **every** `tests/fixtures/tree/<name>` in the catalog passes byte-for-byte. `cargo test --lib` including `omit_use_log_warn_macro`, `resolve_same_file_win`, `resolve_same_file_ambiguous`, `resolve_std_external`. **Not mergeable if `process_handle` differs by a single space.**
-
----
-
-### PR 5 — feat: CLI `tree` (file, directory, stdin)
-
-- **Files / components:** `src/cli.rs` (first-token dispatch + `ColorChoice::Never`), `src/main.rs`, `src/collect.rs` (disk + stdin), `tests/cli.rs` (tree rows).
-- **Depends on:** PR 4b.
-- **Description:** Wire first-token dispatch so `seer <PATH>` is tree, not an unknown subcommand. `seer -`, empty dir, unsupported language, missing path, clap never-color.
-- **Verification:** `cargo test --test cli` for `cli_tree_subcommand`, `cli_tree_bare_path`, `cli_tree_stdin_piped`, `cli_tree_dash`, `cli_tree_directory`, `cli_tree_empty_dir`, `cli_tree_unsupported`, `cli_tree_missing`, `cli_help_no_ansi`, `cli_version`. `cargo test --lib -- cli_tree_no_path_tty`. `cargo test --test fixtures` remains green.
-
----
-
-### PR 6 — feat: `diff-trees` and unified diff
-
-- **Files / components:** `src/diff.rs`, `diff_text` export, CLI `diff-trees`, `tests/fixtures/diff/**`, extra rows in `tests/fixtures.rs` and `tests/cli.rs`.
-- **Depends on:** PR 5 (CLI) and conceptually PR 2; prefer after PR 5 so CLI tests stay additive.
-- **Description:** Implement `difflib`-compatible unified diff. Wire `seer diff-trees A B` exit 0/1 with headers = argv (not `a`/`b`).
-- **Verification:** `cargo test --test fixtures` (tree + diff goldens; library headers `a`/`b`). `cargo test --test cli` `cli_diff_trees_simple` (argv headers) and `cli_diff_trees_identical`.
-
----
-
-### PR 7 — feat: git commit diff and default dirty-vs-HEAD
-
-- **Files / components:** `src/git.rs`, CLI `diff` + default no-args, `tests/git.rs`.
-- **Depends on:** PR 6 (diff) and PR 5 (tree pipeline on collected sources).
-- **Description:** `git` CLI wrapper using `--show-toplevel`. Implement WORKTREE vs HEAD, `seer diff REV`, `seer diff REV1 REV2`, `git_not_a_repo`, `git_untracked_file`, `git_from_subdir`, `git_invalid_rev`. `seer` with no args is the same function as `seer diff` with zero revs (not split: one code path, two product names).
-- **Verification:** `cargo test --test git` — `git_dirty_vs_head`, `git_diff_two_revs`, `git_not_a_repo`, `git_untracked_file`, `git_from_subdir`, `git_diff_one_rev`, `git_invalid_rev`. `cargo test` (full) green.
-
----
-
-### PR 8 — chore: CI and `docs/spec.md`
-
-- **Files / components:** `.github/workflows/ci.yml`, `docs/spec.md` (copy of this document), optional `README.md` with install + four commands.
-- **Depends on:** PR 7 for a complete product; may land after PR 4b if CI only runs `cargo test` on what exists — prefer after PR 7 so CI covers git tests.
-- **Description:** Workflow: checkout, rust-toolchain stable, `cargo test`. No network in the test step after deps are cached. Commit this spec as `docs/spec.md`.
-- **Verification:** CI run on the PR is green. `docs/spec.md` exists. `cargo test` locally green.
+Do not add clap, `src/expand.rs`, `src/entry.rs`, or `src/print.rs` from those tickets. Layout is [Crate layout](#crate-layout). `src/cli.rs` parses `Cmd`. `outline(index, Expand)` lives in `src/resolve.rs`; `print_outline(outline, Label)` lives in `src/ir.rs`. Path filters relative to the repo root live in `src/collect.rs`; `src/git.rs` is rev-parse / ls-tree / cat-file. Merge gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 
 ---
 

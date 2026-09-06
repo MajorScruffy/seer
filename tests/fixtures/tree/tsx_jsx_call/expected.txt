@@ -1,6 +1,6 @@
-fn App
+input.tsx:1 fn App
   if (ok)
     return <div>{foo()}</div>
 
-fn foo
+input.tsx:7 fn foo
   return

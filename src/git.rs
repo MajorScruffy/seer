@@ -29,8 +29,7 @@ pub(crate) fn run(revs: &[String]) -> Result<RunOutput, SeerError> {
         _ => return Err(SeerError::Usage("too many revs".into())),
     };
     let stdout = outline_diff(&left, &right, name_a, name_b);
-    let exit = if stdout.is_empty() { 0 } else { 1 };
-    Ok(RunOutput { stdout, exit })
+    Ok(RunOutput { stdout, exit: 0 })
 }
 
 fn require_repo() -> Result<PathBuf, SeerError> {
@@ -105,8 +104,7 @@ fn git_output(dir: Option<&Path>, args: &[&str]) -> Result<std::process::Output,
     if let Some(dir) = dir {
         cmd.current_dir(dir);
     }
-    cmd.output()
-        .map_err(|e| SeerError::Io(format!("git: {e}")))
+    cmd.output().map_err(|e| SeerError::Io(format!("git: {e}")))
 }
 
 fn git_bytes(dir: Option<&Path>, args: &[&str]) -> Result<Vec<u8>, SeerError> {

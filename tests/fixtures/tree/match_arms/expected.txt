@@ -1,9 +1,9 @@
-fn f
+input.rs:1 fn f
   match x
     0
       return
     1 | 2
-      foo()
+      input.rs:12 foo()
     n if n > 10
       return
     _

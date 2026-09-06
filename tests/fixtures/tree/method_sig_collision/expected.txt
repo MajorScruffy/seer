@@ -1,5 +1,5 @@
-fn valid
+input.rs:8 fn valid
   return
 
-fn process
+input.rs:13 fn process
   x.valid()

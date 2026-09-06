@@ -1,3 +1,3 @@
-fn process
-  foo::bar()
+a.rs:1 fn process
+  foo.rs:1 foo::bar()
     return

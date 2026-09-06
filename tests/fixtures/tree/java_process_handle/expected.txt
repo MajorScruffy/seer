@@ -1,9 +1,9 @@
-fn process
+input.java:2 fn process
   if (items.length == 0)
     return
   for (Item item : items)
     if (item.valid())
-      handle(item)
+      input.java:14 handle(item)
         if (!item.ready())
           return
         JSON.toString(item)

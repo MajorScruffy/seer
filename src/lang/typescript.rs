@@ -1,7 +1,7 @@
 use tree_sitter::Node;
 
 use crate::collapse::collapse_node;
-use crate::ir::{CallKind, CallSite, FnDef, FnId, FnKind, RawNode};
+use crate::ir::{line_of, CallKind, CallSite, FnDef, FnId, FnKind, RawNode};
 use crate::lang::{first_named_child_kind, header_before_field, ident_path, node_text};
 use crate::omit::{should_omit_at_extract, UseMap};
 
@@ -50,16 +50,19 @@ fn walk_index<'a>(
         } else {
             Vec::new()
         };
+        let start_byte = node.start_byte();
         out.push(FnDef {
             id: FnId {
                 file: file.to_string(),
-                start_byte: node.start_byte(),
+                start_byte,
             },
+            start_line: line_of(src, start_byte),
             name: fn_name(node, src),
             kind: classify(node),
             module: module.to_vec(),
             nested: in_fn,
             has_body,
+            end_byte: node.end_byte(),
             body,
         });
         for i in 0..node.named_child_count() {
@@ -346,11 +349,12 @@ fn emit_site(node: Node, kind: CallKind, ctx: &Ctx) -> Vec<RawNode> {
         is_macro: false,
         file: ctx.file.to_string(),
     };
-    if should_omit_at_extract(&site, ctx.uses) {
-        Vec::new()
-    } else {
-        vec![RawNode::Call { site }]
+    let mut out = Vec::new();
+    if !should_omit_at_extract(&site, ctx.uses) {
+        out.push(RawNode::Call { site });
     }
+    out.extend(walk_field(node, "arguments", ctx));
+    out
 }
 
 pub fn collect_imports(root: Node, src: &str, file: &str, map: &mut UseMap) {

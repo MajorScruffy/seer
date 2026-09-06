@@ -1,7 +1,7 @@
-fn f
+input.rs:1 fn f
   todo!()
   assert!(true)
   format!("a{}", 1)
   vec![1, 2]
-  unwrap_now()
+  input.rs:9 unwrap_now()
     x.unwrap()

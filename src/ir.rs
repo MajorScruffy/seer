@@ -16,12 +16,31 @@ pub enum FnKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FnDef {
     pub id: FnId,
+    /// 1-based line of `id.start_byte`. Tree jumps need it; print decides the prefix.
+    pub start_line: usize,
     pub name: String,
     pub kind: FnKind,
     pub module: Vec<String>,
     pub nested: bool,
     pub has_body: bool,
+    /// Exclusive UTF-8 end offset of the definition node.
+    pub end_byte: usize,
     pub body: Vec<RawNode>,
+}
+
+/// 1-based line of a byte offset.
+pub fn line_of(src: &str, start_byte: usize) -> usize {
+    let n = start_byte.min(src.len());
+    src.as_bytes()[..n].iter().filter(|&&b| b == b'\n').count() + 1
+}
+
+impl FnDef {
+    pub fn source_location(&self) -> Loc {
+        Loc {
+            file: self.id.file.clone(),
+            line: self.start_line,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,9 +48,25 @@ pub struct Outline {
     pub roots: Vec<OutlineNode>,
 }
 
+/// File and 1-based line of a def or resolved call. Print prefixes this; expand does not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Loc {
+    pub file: String,
+    pub line: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Label {
+    /// `path:line` — tree jump targets.
+    Jump,
+    /// `path` only — flow/diff stays quiet on line shifts.
+    Flow,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutlineNode {
     pub text: String,
+    pub loc: Option<Loc>,
     pub children: Vec<OutlineNode>,
 }
 
@@ -69,7 +104,7 @@ pub enum CallKind {
     Method { name: String },
 }
 
-pub fn print(outline: &Outline) -> String {
+pub fn print_outline(outline: &Outline, label: Label) -> String {
     if outline.roots.is_empty() {
         return String::new();
     }
@@ -78,17 +113,28 @@ pub fn print(outline: &Outline) -> String {
         if i > 0 {
             out.push('\n');
         }
-        emit(root, 0, &mut out);
+        write_outline_node(root, 0, label, &mut out);
     }
     out
 }
 
-fn emit(node: &OutlineNode, depth: usize, out: &mut String) {
+fn write_outline_node(node: &OutlineNode, depth: usize, label: Label, out: &mut String) {
     out.push_str(&" ".repeat(2 * depth));
-    out.push_str(&node.text);
+    match &node.loc {
+        None => out.push_str(&node.text),
+        Some(loc) => {
+            out.push_str(&loc.file);
+            if matches!(label, Label::Jump) {
+                out.push(':');
+                out.push_str(&loc.line.to_string());
+            }
+            out.push(' ');
+            out.push_str(&node.text);
+        }
+    }
     out.push('\n');
     for child in &node.children {
-        emit(child, depth + 1, out);
+        write_outline_node(child, depth + 1, label, out);
     }
 }
 
@@ -99,14 +145,50 @@ mod tests {
     fn node(text: &str, children: Vec<OutlineNode>) -> OutlineNode {
         OutlineNode {
             text: text.to_string(),
+            loc: None,
             children,
         }
     }
 
     #[test]
+    fn line_of_counts_newlines() {
+        assert_eq!(line_of("fn a", 0), 1);
+        assert_eq!(line_of("fn a\nfn b\n", 5), 2);
+    }
+
+    #[test]
+    fn print_jump_and_flow_labels() {
+        let outline = Outline {
+            roots: vec![OutlineNode {
+                text: "fn process".into(),
+                loc: Some(Loc {
+                    file: "a.rs".into(),
+                    line: 1,
+                }),
+                children: vec![OutlineNode {
+                    text: "handle()".into(),
+                    loc: Some(Loc {
+                        file: "a.rs".into(),
+                        line: 13,
+                    }),
+                    children: vec![],
+                }],
+            }],
+        };
+        assert_eq!(
+            print_outline(&outline, Label::Jump),
+            "a.rs:1 fn process\n  a.rs:13 handle()\n"
+        );
+        assert_eq!(
+            print_outline(&outline, Label::Flow),
+            "a.rs fn process\n  a.rs handle()\n"
+        );
+    }
+
+    #[test]
     fn print_empty() {
         let outline = Outline { roots: vec![] };
-        assert_eq!(print(&outline), "");
+        assert_eq!(print_outline(&outline, Label::Jump), "");
     }
 
     #[test]
@@ -117,7 +199,10 @@ mod tests {
                 node("fn b", vec![node("return", vec![])]),
             ],
         };
-        assert_eq!(print(&outline), "fn a\n  return\n\nfn b\n  return\n");
+        assert_eq!(
+            print_outline(&outline, Label::Jump),
+            "fn a\n  return\n\nfn b\n  return\n"
+        );
     }
 
     #[test]
@@ -128,7 +213,7 @@ mod tests {
                 vec![node("if cond", vec![node("return", vec![])])],
             )],
         };
-        let out = print(&outline);
+        let out = print_outline(&outline, Label::Jump);
         assert_eq!(out, "fn outer\n  if cond\n    return\n");
         assert!(out.ends_with('\n'));
         for line in out.lines() {

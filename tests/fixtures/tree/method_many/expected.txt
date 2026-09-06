@@ -1,6 +1,6 @@
-fn valid
+input.rs:5 fn valid
 
-fn valid
+input.rs:9 fn valid
 
-fn process
+input.rs:12 fn process
   a.valid()

@@ -1,7 +1,7 @@
 use tree_sitter::Node;
 
 use crate::collapse::{collapse_node, strip_std};
-use crate::ir::{CallSite, FnDef, FnId, RawNode};
+use crate::ir::{line_of, CallSite, FnDef, FnId, RawNode};
 use crate::lang::rust::{
     self, call_kind, classify_function_item, fn_name, header_for, header_if, header_loop,
     header_match, header_while, path_segments,
@@ -56,16 +56,19 @@ fn walk_index<'a>(
         } else {
             Vec::new()
         };
+        let start_byte = node.start_byte();
         out.push(FnDef {
             id: FnId {
                 file: file.to_string(),
-                start_byte: node.start_byte(),
+                start_byte,
             },
+            start_line: line_of(src, start_byte),
             name: fn_name(node, src),
             kind: classify_function_item(node),
             module: module.to_vec(),
             nested: in_fn,
             has_body,
+            end_byte: node.end_byte(),
             body,
         });
         for i in 0..node.named_child_count() {
@@ -76,16 +79,19 @@ fn walk_index<'a>(
         return;
     }
     if node.kind() == rust::FUNCTION_SIGNATURE_ITEM {
+        let start_byte = node.start_byte();
         out.push(FnDef {
             id: FnId {
                 file: file.to_string(),
-                start_byte: node.start_byte(),
+                start_byte,
             },
+            start_line: line_of(src, start_byte),
             name: fn_name(node, src),
             kind: classify_function_item(node),
             module: module.to_vec(),
             nested: in_fn,
             has_body: false,
+            end_byte: node.end_byte(),
             body: Vec::new(),
         });
         return;
@@ -132,31 +138,38 @@ pub(crate) fn find_function_item<'a>(node: Node<'a>, src: &str, name: &str) -> O
 /// Print one function’s raw tree as an Outline (calls as leaves).
 #[cfg(test)]
 pub(crate) fn print_raw_fn(name: &str, body: &[RawNode]) -> String {
-    use crate::ir::{print, Outline, OutlineNode};
-    print(&Outline {
-        roots: vec![OutlineNode {
-            text: format!("fn {name}"),
-            children: raw_to_outline(body),
-        }],
-    })
+    use crate::ir::{print_outline, Label, Outline, OutlineNode};
+    print_outline(
+        &Outline {
+            roots: vec![OutlineNode {
+                text: format!("fn {name}"),
+                loc: None,
+                children: raw_nodes_to_outline(body),
+            }],
+        },
+        Label::Jump,
+    )
 }
 
 #[cfg(test)]
-fn raw_to_outline(nodes: &[RawNode]) -> Vec<crate::ir::OutlineNode> {
+fn raw_nodes_to_outline(nodes: &[RawNode]) -> Vec<crate::ir::OutlineNode> {
     use crate::ir::OutlineNode;
     nodes
         .iter()
         .map(|n| match n {
             RawNode::Control { text, children } => OutlineNode {
                 text: text.clone(),
-                children: raw_to_outline(children),
+                loc: None,
+                children: raw_nodes_to_outline(children),
             },
             RawNode::NestedFn { name, children } => OutlineNode {
                 text: format!("fn {name}"),
-                children: raw_to_outline(children),
+                loc: None,
+                children: raw_nodes_to_outline(children),
             },
             RawNode::Call { site } => OutlineNode {
                 text: site.display.clone(),
+                loc: None,
                 children: Vec::new(),
             },
         })
@@ -334,7 +347,7 @@ fn emit_call(node: Node, ctx: &Ctx, is_macro: bool) -> Vec<RawNode> {
                 .last()
                 .is_some_and(|s| s.starts_with(|c: char| c.is_ascii_uppercase()))
             {
-                return Vec::new();
+                return walk_field(node, "arguments", ctx);
             }
         }
     }
@@ -344,11 +357,14 @@ fn emit_call(node: Node, ctx: &Ctx, is_macro: bool) -> Vec<RawNode> {
         is_macro,
         file: ctx.file.to_string(),
     };
-    if should_omit_at_extract(&site, ctx.uses) {
-        Vec::new()
-    } else {
-        vec![RawNode::Call { site }]
+    let mut out = Vec::new();
+    if !should_omit_at_extract(&site, ctx.uses) {
+        out.push(RawNode::Call { site });
     }
+    if !is_macro {
+        out.extend(walk_field(node, "arguments", ctx));
+    }
+    out
 }
 
 fn emit_macro(node: Node, ctx: &Ctx) -> Vec<RawNode> {
@@ -362,7 +378,7 @@ mod tests {
 
     fn outline_of(src: &str, name: &str) -> String {
         let tree = parse_rust(src);
-        let uses = UseMap::from_tree(tree.root_node(), src);
+        let uses = UseMap::from_rust_use_tree(tree.root_node(), src);
         let fn_item = find_function_item(tree.root_node(), src, name).expect(name);
         let body = extract_fn(fn_item, src, "input.rs", &uses);
         print_raw_fn(name, &body)
@@ -462,6 +478,20 @@ fn f() {
 }
 "#;
         assert_eq!(outline_of(src, "f"), "fn f\n  compute()\n");
+    }
+
+    #[test]
+    fn extract_call_in_args() {
+        let src = r#"
+fn f() {
+    wrap(inner());
+    Some(inner());
+}
+"#;
+        assert_eq!(
+            outline_of(src, "f"),
+            "fn f\n  wrap(inner())\n  inner()\n  inner()\n"
+        );
     }
 
     #[test]

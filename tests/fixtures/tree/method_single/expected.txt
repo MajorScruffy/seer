@@ -1,4 +1,4 @@
-fn process
+input.rs:9 fn process
   if item.ok()
-    item.valid()
+    input.rs:4 item.valid()
       return true

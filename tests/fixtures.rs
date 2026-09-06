@@ -26,7 +26,13 @@ fn tree_goldens() {
     for name in names {
         let dir = root.join(&name);
         let actual = outline_tree_fixture(&dir);
-        let expected = fs::read(dir.join("expected.txt"))
+        let expected_path = dir.join("expected.txt");
+        if std::env::var("UPDATE_GOLDENS").is_ok() {
+            fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("write {}: {e}", expected_path.display()));
+            continue;
+        }
+        let expected = fs::read(&expected_path)
             .unwrap_or_else(|e| panic!("read expected.txt in {}: {e}", dir.display()));
         assert_bytes_eq(&name, &expected, actual.as_bytes());
     }

@@ -1,5 +1,5 @@
-fn process
-  super::bar()
+foo.rs:1 fn process
+  lib.rs:1 super::bar()
     return
-  self::local()
+  foo.rs:6 self::local()
     return

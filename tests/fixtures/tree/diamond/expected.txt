@@ -1,7 +1,7 @@
-fn a
-  b()
-    d()
+input.rs:1 fn a
+  input.rs:6 b()
+    input.rs:14 d()
       return
-  c()
-    d()
+  input.rs:10 c()
+    input.rs:14 d()
       return

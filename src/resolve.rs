@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::extract::index_defs;
-use crate::ir::{self, CallKind, CallSite, FnDef, FnId, FnKind, OutlineNode, RawNode};
+use crate::ir::{CallKind, CallSite, FnDef, FnId, FnKind, Outline, OutlineNode, RawNode};
 use crate::lang::{language_for_path, Language};
 use crate::omit::{should_omit_resolved, UseMap};
 use crate::parse::parse_path;
@@ -19,11 +19,11 @@ pub struct ResolveIndex {
 }
 
 impl ResolveIndex {
-    pub fn def(&self, id: &FnId) -> Option<&FnDef> {
+    pub fn function(&self, id: &FnId) -> Option<&FnDef> {
         self.by_id.get(id).copied().map(|i| &self.defs[i])
     }
 
-    fn module_of(&self, file: &str) -> &[String] {
+    fn module_for_file(&self, file: &str) -> &[String] {
         self.file_module.get(file).map(Vec::as_slice).unwrap_or(&[])
     }
 }
@@ -112,16 +112,16 @@ fn resolve_free(path: &[String], file: &str, index: &ResolveIndex) -> Option<FnI
 }
 
 fn resolve_qualified(path: &[String], file: &str, index: &ResolveIndex) -> Option<FnId> {
-    if is_lang_external(&path[0]) {
+    if is_standard_library_crate(&path[0]) {
         return None;
     }
     let name = path.last()?;
     let prefix = &path[..path.len() - 1];
-    let mod_path = map_prefix_to_module(prefix, file, index)?;
+    let mod_path = module_path_from_prefix(prefix, file, index)?;
     if !index.modules.contains(&mod_path) {
         return None;
     }
-    unique_callable(index, file, |d| d.module == mod_path && d.name == *name)
+    unique_function_matching(index, file, |d| d.module == mod_path && d.name == *name)
 }
 
 fn resolve_unqualified(name: &str, file: &str, index: &ResolveIndex) -> Option<FnId> {
@@ -142,13 +142,13 @@ fn resolve_unqualified(name: &str, file: &str, index: &ResolveIndex) -> Option<F
         }
         let mut ids: Vec<FnId> = Vec::new();
         for prefix in uses.globs() {
-            let Some(mod_path) = map_prefix_to_module(prefix, file, index) else {
+            let Some(mod_path) = module_path_from_prefix(prefix, file, index) else {
                 continue;
             };
             if !index.modules.contains(&mod_path) {
                 continue;
             }
-            for d in free_defs(index).filter(|d| d.module == mod_path && d.name == name) {
+            for d in free_functions(index).filter(|d| d.module == mod_path && d.name == name) {
                 if !ids.contains(&d.id) {
                     ids.push(d.id.clone());
                 }
@@ -161,8 +161,8 @@ fn resolve_unqualified(name: &str, file: &str, index: &ResolveIndex) -> Option<F
         }
     }
 
-    let cur_mod = index.module_of(file);
-    unique_callable(index, file, |d| {
+    let cur_mod = index.module_for_file(file);
+    unique_function_matching(index, file, |d| {
         d.module == cur_mod && d.id.file != file && d.name == name
     })
 }
@@ -172,7 +172,7 @@ fn resolve_imported(bound: &[String], file: &str, index: &ResolveIndex) -> Optio
         return None;
     }
     if bound.len() == 1 {
-        if is_lang_external(&bound[0]) {
+        if is_standard_library_crate(&bound[0]) {
             return None;
         }
         // Single-segment `use foo` is not a function path; treat as 0 defs.
@@ -182,7 +182,7 @@ fn resolve_imported(bound: &[String], file: &str, index: &ResolveIndex) -> Optio
 }
 
 /// Leading `super` is disjoint from `crate` / `self` / else — no fallthrough.
-fn map_prefix_to_module(
+fn module_path_from_prefix(
     prefix: &[String],
     file: &str,
     index: &ResolveIndex,
@@ -192,7 +192,7 @@ fn map_prefix_to_module(
     }
     match prefix[0].as_str() {
         "super" => {
-            let mut acc = index.module_of(file).to_vec();
+            let mut acc = index.module_for_file(file).to_vec();
             let mut rest = prefix;
             while rest.first().map(String::as_str) == Some("super") {
                 if acc.is_empty() {
@@ -206,7 +206,7 @@ fn map_prefix_to_module(
         }
         "crate" => Some(prefix[1..].to_vec()),
         "self" => {
-            let mut acc = index.module_of(file).to_vec();
+            let mut acc = index.module_for_file(file).to_vec();
             acc.extend(prefix[1..].iter().cloned());
             Some(acc)
         }
@@ -214,39 +214,39 @@ fn map_prefix_to_module(
     }
 }
 
-fn is_lang_external(seg: &str) -> bool {
+fn is_standard_library_crate(seg: &str) -> bool {
     LANG_EXTERN.contains(&seg)
 }
 
-fn free_defs(index: &ResolveIndex) -> impl Iterator<Item = &FnDef> {
+fn free_functions(index: &ResolveIndex) -> impl Iterator<Item = &FnDef> {
     index
         .defs
         .iter()
         .filter(|d| d.kind == FnKind::Free && d.has_body)
 }
 
-fn unique_free(index: &ResolveIndex, pred: impl Fn(&FnDef) -> bool) -> Option<FnId> {
-    let hits: Vec<&FnDef> = free_defs(index).filter(|d| pred(d)).collect();
+fn unique_free_function(index: &ResolveIndex, pred: impl Fn(&FnDef) -> bool) -> Option<FnId> {
+    let hits: Vec<&FnDef> = free_functions(index).filter(|d| pred(d)).collect();
     match hits.as_slice() {
         [one] => Some(one.id.clone()),
         _ => None,
     }
 }
 
-/// FnIds that some non-omitted call resolves to as an expand target.
-pub fn called_targets(index: &ResolveIndex) -> HashSet<FnId> {
+/// FnIds that some call resolves to as an expand target.
+pub(crate) fn called_functions(index: &ResolveIndex) -> HashSet<FnId> {
     let mut called = HashSet::new();
     for def in &index.defs {
-        collect_calls(&def.body, index, &mut called);
+        collect_resolved_callees(&def.body, index, &mut called);
     }
     called
 }
 
-fn collect_calls(nodes: &[RawNode], index: &ResolveIndex, called: &mut HashSet<FnId>) {
+fn collect_resolved_callees(nodes: &[RawNode], index: &ResolveIndex, called: &mut HashSet<FnId>) {
     for node in nodes {
         match node {
             RawNode::Control { children, .. } | RawNode::NestedFn { children, .. } => {
-                collect_calls(children, index, called);
+                collect_resolved_callees(children, index, called);
             }
             RawNode::Call { site } => {
                 if let Some(id) = resolve(site, index) {
@@ -258,7 +258,7 @@ fn collect_calls(nodes: &[RawNode], index: &ResolveIndex, called: &mut HashSet<F
 }
 
 /// Non-nested body-bearing defs that no call expands to; cycle fallback if none.
-pub fn select_entries(index: &ResolveIndex, called: &HashSet<FnId>) -> Vec<FnId> {
+pub(crate) fn select_entries(index: &ResolveIndex, called: &HashSet<FnId>) -> Vec<FnId> {
     let candidates: Vec<&FnDef> = index
         .defs
         .iter()
@@ -276,138 +276,102 @@ pub fn select_entries(index: &ResolveIndex, called: &HashSet<FnId>) -> Vec<FnId>
     entries
 }
 
-pub fn expand_fn(def: &FnDef, stack: &mut Vec<FnId>, index: &ResolveIndex) -> Vec<OutlineNode> {
-    stack.push(def.id.clone());
-    let nodes = expand_nodes(&def.body, stack, index);
-    stack.pop();
-    nodes
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Expand {
+    /// Re-expand a callee at every call site (tree).
+    Every,
+    /// Expand each callee once; later sites are leaves (flow/diff).
+    Once,
 }
 
-fn expand_nodes(raws: &[RawNode], stack: &mut Vec<FnId>, index: &ResolveIndex) -> Vec<OutlineNode> {
-    raws.iter()
-        .flat_map(|raw| expand_raw(raw, stack, index))
-        .collect()
-}
-
-fn expand_raw(raw: &RawNode, stack: &mut Vec<FnId>, index: &ResolveIndex) -> Vec<OutlineNode> {
-    match raw {
-        RawNode::Control { text, children } => vec![OutlineNode {
-            text: text.clone(),
-            children: expand_nodes(children, stack, index),
-        }],
-        RawNode::NestedFn { name, children } => vec![OutlineNode {
-            text: format!("fn {name}"),
-            children: expand_nodes(children, stack, index),
-        }],
-        RawNode::Call { site } => expand_call(site, stack, index),
-    }
-}
-
-fn expand_call(site: &CallSite, stack: &mut Vec<FnId>, index: &ResolveIndex) -> Vec<OutlineNode> {
-    let target = resolve(site, index);
-    let empty = UseMap::default();
-    let uses = index.uses.get(&site.file).unwrap_or(&empty);
-    if should_omit_resolved(site, uses, target.is_some()) {
-        return Vec::new();
-    }
-    let text = site.display.clone();
-    let Some(id) = target else {
-        return vec![OutlineNode {
-            text,
-            children: Vec::new(),
-        }];
-    };
-    if stack.contains(&id) {
-        return vec![OutlineNode {
-            text: format!("{text} [recursive]"),
-            children: Vec::new(),
-        }];
-    }
-    let def = index.def(&id).expect("resolved id is indexed");
-    vec![OutlineNode {
-        text,
-        children: expand_fn(def, stack, index),
-    }]
-}
-
-/// Entry-rooted flow: each callee expands once. Roots sorted by file then name
-/// so moving a definition in a file does not change the outline.
-pub fn flow_outline(index: &ResolveIndex) -> String {
-    let called = called_targets(index);
+pub fn outline(index: &ResolveIndex, mode: Expand) -> Outline {
+    let called = called_functions(index);
     let mut entries = select_entries(index, &called);
-    entries.sort_by(|a, b| {
-        let da = index.def(a).expect("entry is indexed");
-        let db = index.def(b).expect("entry is indexed");
-        da.id
-            .file
-            .cmp(&db.id.file)
-            .then(da.name.cmp(&db.name))
-            .then(da.id.start_byte.cmp(&db.id.start_byte))
-    });
+    if mode == Expand::Once {
+        entries.sort_by(|a, b| {
+            let da = index.function(a).expect("entry is indexed");
+            let db = index.function(b).expect("entry is indexed");
+            da.id
+                .file
+                .cmp(&db.id.file)
+                .then(da.name.cmp(&db.name))
+                .then(da.id.start_byte.cmp(&db.id.start_byte))
+        });
+    }
     let mut seen = HashSet::new();
     let mut roots = Vec::new();
     for id in entries {
-        if seen.contains(&id) {
+        if mode == Expand::Once && seen.contains(&id) {
             continue;
         }
-        let def = index.def(&id).expect("entry is indexed");
+        let def = index.function(&id).expect("entry is indexed");
         let mut stack = Vec::new();
-        let children = expand_once(def, &mut stack, &mut seen, index);
+        let children = match mode {
+            Expand::Every => expand_function(def, &mut stack, None, index),
+            Expand::Once => expand_function(def, &mut stack, Some(&mut seen), index),
+        };
         roots.push(OutlineNode {
             text: format!("fn {}", def.name),
+            loc: Some(def.source_location()),
             children,
         });
     }
-    ir::print(&ir::Outline { roots })
+    Outline { roots }
 }
 
-fn expand_once(
+fn expand_function(
     def: &FnDef,
     stack: &mut Vec<FnId>,
-    seen: &mut HashSet<FnId>,
+    mut seen: Option<&mut HashSet<FnId>>,
     index: &ResolveIndex,
 ) -> Vec<OutlineNode> {
-    seen.insert(def.id.clone());
+    if let Some(seen) = seen.as_deref_mut() {
+        seen.insert(def.id.clone());
+    }
     stack.push(def.id.clone());
-    let nodes = expand_once_nodes(&def.body, stack, seen, index);
+    let nodes = expand_body_nodes(&def.body, stack, seen, index);
     stack.pop();
     nodes
 }
 
-fn expand_once_nodes(
+fn expand_body_nodes(
     raws: &[RawNode],
     stack: &mut Vec<FnId>,
-    seen: &mut HashSet<FnId>,
+    mut seen: Option<&mut HashSet<FnId>>,
     index: &ResolveIndex,
 ) -> Vec<OutlineNode> {
-    raws.iter()
-        .flat_map(|raw| expand_once_raw(raw, stack, seen, index))
-        .collect()
+    let mut out = Vec::new();
+    for raw in raws {
+        out.extend(expand_one_node(raw, stack, seen.as_deref_mut(), index));
+    }
+    out
 }
 
-fn expand_once_raw(
+fn expand_one_node(
     raw: &RawNode,
     stack: &mut Vec<FnId>,
-    seen: &mut HashSet<FnId>,
+    seen: Option<&mut HashSet<FnId>>,
     index: &ResolveIndex,
 ) -> Vec<OutlineNode> {
     match raw {
         RawNode::Control { text, children } => vec![OutlineNode {
             text: text.clone(),
-            children: expand_once_nodes(children, stack, seen, index),
+            loc: None,
+            children: expand_body_nodes(children, stack, seen, index),
         }],
         RawNode::NestedFn { name, children } => vec![OutlineNode {
             text: format!("fn {name}"),
-            children: expand_once_nodes(children, stack, seen, index),
+            loc: None,
+            children: expand_body_nodes(children, stack, seen, index),
         }],
-        RawNode::Call { site } => expand_once_call(site, stack, seen, index),
+        RawNode::Call { site } => expand_call_site(site, stack, seen, index),
     }
 }
 
-fn expand_once_call(
+fn expand_call_site(
     site: &CallSite,
     stack: &mut Vec<FnId>,
-    seen: &mut HashSet<FnId>,
+    seen: Option<&mut HashSet<FnId>>,
     index: &ResolveIndex,
 ) -> Vec<OutlineNode> {
     let target = resolve(site, index);
@@ -416,37 +380,39 @@ fn expand_once_call(
     if should_omit_resolved(site, uses, target.is_some()) {
         return Vec::new();
     }
+    let def = target.as_ref().and_then(|id| index.function(id));
+    let loc = def.map(FnDef::source_location);
     let text = site.display.clone();
     let Some(id) = target else {
         return vec![OutlineNode {
             text,
+            loc: None,
             children: Vec::new(),
         }];
     };
     if stack.contains(&id) {
         return vec![OutlineNode {
             text: format!("{text} [recursive]"),
+            loc,
             children: Vec::new(),
         }];
     }
-    if seen.contains(&id) {
+    if seen.as_ref().is_some_and(|s| s.contains(&id)) {
         return vec![OutlineNode {
             text,
+            loc,
             children: Vec::new(),
         }];
     }
-    let def = index.def(&id).expect("resolved id is indexed");
+    let def = def.expect("resolved id is indexed");
     vec![OutlineNode {
         text,
-        children: expand_once(def, stack, seen, index),
+        loc,
+        children: expand_function(def, stack, seen, index),
     }]
 }
 
-pub fn flow_diff(left: &ResolveIndex, right: &ResolveIndex) -> (String, String) {
-    (flow_outline(left), flow_outline(right))
-}
-
-fn unique_callable(
+fn unique_function_matching(
     index: &ResolveIndex,
     file: &str,
     pred: impl Fn(&FnDef) -> bool,
@@ -463,7 +429,7 @@ fn unique_callable(
                 _ => None,
             }
         }
-        _ => unique_free(index, pred),
+        _ => unique_free_function(index, pred),
     }
 }
 
@@ -471,7 +437,7 @@ fn unique_callable(
 mod tests {
     use super::*;
 
-    fn site_free(file: &str, path: &[&str]) -> CallSite {
+    fn free_call_site(file: &str, path: &[&str]) -> CallSite {
         CallSite {
             display: path.join("::"),
             kind: CallKind::Free {
@@ -488,8 +454,8 @@ mod tests {
             "input.rs".into(),
             "fn process() { handle(); }\nfn handle() { return; }\n".into(),
         )]);
-        let id = resolve(&site_free("input.rs", &["handle"]), &index).expect("unique handle");
-        assert_eq!(index.def(&id).unwrap().name, "handle");
+        let id = resolve(&free_call_site("input.rs", &["handle"]), &index).expect("unique handle");
+        assert_eq!(index.function(&id).unwrap().name, "handle");
         assert_eq!(id.file, "input.rs");
     }
 
@@ -499,7 +465,10 @@ mod tests {
             "input.rs".into(),
             "fn process() { handle(); }\nfn handle() { return; }\nfn handle() { return; }\n".into(),
         )]);
-        assert_eq!(resolve(&site_free("input.rs", &["handle"]), &index), None);
+        assert_eq!(
+            resolve(&free_call_site("input.rs", &["handle"]), &index),
+            None
+        );
     }
 
     #[test]
@@ -509,7 +478,7 @@ mod tests {
             "fn f() { std::fs::write(path, data); }\n".into(),
         )]);
         assert_eq!(
-            resolve(&site_free("input.rs", &["std", "fs", "write"]), &index),
+            resolve(&free_call_site("input.rs", &["std", "fs", "write"]), &index),
             None
         );
     }

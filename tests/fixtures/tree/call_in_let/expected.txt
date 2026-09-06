@@ -1,5 +1,5 @@
-fn f
-  compute()
+input.rs:1 fn f
+  input.rs:6 compute()
     return
-  compute()
+  input.rs:6 compute()
     return

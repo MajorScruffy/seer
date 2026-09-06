@@ -1,3 +1,3 @@
-fn f
-  info()
+input.java:6 fn f
+  input.java:2 info()
     return

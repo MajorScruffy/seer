@@ -1,9 +1,9 @@
-fn process
+input.ts:1 fn process
   if (items.length === 0)
     return
   for (const item of items)
     if (item.valid())
-      handle(item)
+      input.ts:13 handle(item)
         if (!item.ready())
           return
         JSON.stringify(item)

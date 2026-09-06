@@ -1,6 +1,6 @@
-fn process
-  handle()
+a.rs:1 fn process
+  a.rs:5 handle()
     return
 
-fn handle
+b.rs:1 fn handle
   todo!()

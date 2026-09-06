@@ -8,10 +8,15 @@ pub fn diff_text(a: &str, b: &str, name_a: &str, name_b: &str) -> String {
     if a == b {
         return String::new();
     }
-    unified_diff(&split_keepends(a), &split_keepends(b), name_a, name_b)
+    unified_diff(
+        &split_lines_keep_newline(a),
+        &split_lines_keep_newline(b),
+        name_a,
+        name_b,
+    )
 }
 
-fn split_keepends(s: &str) -> Vec<&str> {
+fn split_lines_keep_newline(s: &str) -> Vec<&str> {
     if s.is_empty() {
         Vec::new()
     } else {
@@ -190,7 +195,7 @@ fn opcodes(a: &[&str], b: &[&str]) -> Vec<Opcode> {
 fn matching_blocks(a: &[&str], b: &[&str]) -> Vec<(usize, usize, usize)> {
     let la = a.len();
     let lb = b.len();
-    let b2j = chain_b(b);
+    let b2j = line_indexes_in_b(b);
     let mut queue = vec![(0usize, la, 0usize, lb)];
     let mut matching = Vec::new();
     while let Some((alo, ahi, blo, bhi)) = queue.pop() {
@@ -230,7 +235,7 @@ fn matching_blocks(a: &[&str], b: &[&str]) -> Vec<(usize, usize, usize)> {
     non_adjacent
 }
 
-fn chain_b<'a>(b: &[&'a str]) -> HashMap<&'a str, Vec<usize>> {
+fn line_indexes_in_b<'a>(b: &[&'a str]) -> HashMap<&'a str, Vec<usize>> {
     let mut b2j: HashMap<&str, Vec<usize>> = HashMap::new();
     for (i, elt) in b.iter().enumerate() {
         b2j.entry(*elt).or_default().push(i);

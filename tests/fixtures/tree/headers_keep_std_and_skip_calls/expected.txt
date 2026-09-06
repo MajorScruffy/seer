@@ -1,4 +1,4 @@
-fn f
+input.rs:1 fn f
   if std::fs::exists(p)
     return
   for x in items.iter()
@@ -7,5 +7,5 @@ fn f
     _
       return
 
-fn compute
+input.rs:13 fn compute
   return 1

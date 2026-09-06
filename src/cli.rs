@@ -88,8 +88,7 @@ fn run_diff_trees(path_a: &str, path_b: &str) -> Result<RunOutput, SeerError> {
     let a = read_outline_text(path_a)?;
     let b = read_outline_text(path_b)?;
     let stdout = diff_text(&a, &b, path_a, path_b);
-    let exit = if stdout.is_empty() { 0 } else { 1 };
-    Ok(RunOutput { stdout, exit })
+    Ok(RunOutput { stdout, exit: 0 })
 }
 
 fn read_outline_text(path: &str) -> Result<String, SeerError> {

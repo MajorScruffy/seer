@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use tree_sitter::Node;
 
 use crate::ir::{CallKind, CallSite};
-use crate::lang::rust::path_segments;
 use crate::lang::node_text;
+use crate::lang::rust::path_segments;
 
 const OMIT_MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
 
@@ -22,7 +22,7 @@ enum Binding {
 }
 
 impl UseMap {
-    pub fn from_tree(root: Node, src: &str) -> Self {
+    pub fn from_rust_use_tree(root: Node, src: &str) -> Self {
         let mut map = Self::default();
         collect_use_decls(root, src, &mut map);
         map
@@ -71,7 +71,7 @@ impl UseMap {
                 crate::lang::typescript::collect_imports(root, src, file, &mut map);
                 map
             }
-            _ => Self::from_tree(root, src),
+            _ => Self::from_rust_use_tree(root, src),
         }
     }
 }
@@ -256,7 +256,7 @@ mod tests {
 
     fn outline_of(src: &str, name: &str) -> String {
         let tree = parse_rust(src);
-        let uses = UseMap::from_tree(tree.root_node(), src);
+        let uses = UseMap::from_rust_use_tree(tree.root_node(), src);
         let fn_item = find_function_item(tree.root_node(), src, name).expect(name);
         let body = extract_fn(fn_item, src, "input.rs", &uses);
         print_raw_fn(name, &body)
@@ -367,7 +367,7 @@ fn f() {
         ];
         assert_eq!(
             crate::outline_files(&files),
-            "fn main\n  log::init()\n    return\n"
+            "main.rs:1 fn main\n  log.rs:1 log::init()\n    return\n"
         );
 
         let files = [
@@ -379,7 +379,7 @@ fn f() {
         ];
         assert_eq!(
             crate::outline_files(&files),
-            "fn main\n  init()\n    return\n"
+            "lib.rs:2 fn main\n  log.rs:1 init()\n    return\n"
         );
     }
 
@@ -407,7 +407,7 @@ fn f() {
 "#;
         assert_eq!(outline_of(src, "f"), "fn f\n  todo!()\n  foo()\n  return\n");
         let tree = parse_rust(src);
-        let uses = UseMap::from_tree(tree.root_node(), src);
+        let uses = UseMap::from_rust_use_tree(tree.root_node(), src);
         assert_eq!(uses.globs(), &[vec!["tracing".to_string()]]);
     }
 }

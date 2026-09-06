@@ -1,5 +1,5 @@
-fn a
+input.rs:1 fn a
   return
 
-fn b
+input.rs:5 fn b
   return

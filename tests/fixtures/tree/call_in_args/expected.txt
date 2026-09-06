@@ -1,0 +1,5 @@
+input.rs:1 fn outer
+  input.rs:5 wrap(inner())
+    return
+  input.rs:9 inner()
+    return 1

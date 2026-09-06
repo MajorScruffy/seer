@@ -123,11 +123,11 @@ mod tests {
 
     #[test]
     fn collapse_node_only_three_literal_kinds() {
-        use crate::parse::{find_kind, parse_rust};
+        use crate::parse::{find_node_kind, parse_rust};
 
         let src = r#"fn f() { foo(  "a  b"  ,  r"c  d"  ,  ' '  ,  /*  not  lit  */  1  ); }"#;
         let tree = parse_rust(src);
-        let call = find_kind(tree.root_node(), "call_expression").expect("call");
+        let call = find_node_kind(tree.root_node(), "call_expression").expect("call");
         assert_eq!(
             collapse_node(call, src),
             r#"foo( "a  b" , r"c  d" , ' ' , /* not lit */ 1 )"#
