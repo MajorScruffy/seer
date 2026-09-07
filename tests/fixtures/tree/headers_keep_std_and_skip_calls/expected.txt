@@ -4,8 +4,7 @@ input.rs:1 fn f
   for x in items.iter()
     return
   match compute()
+    input.rs:13 compute()
+      return 1
     _
       return
-
-input.rs:13 fn compute
-  return 1

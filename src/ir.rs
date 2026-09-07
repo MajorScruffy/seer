@@ -83,6 +83,9 @@ pub enum RawNode {
     },
     Call {
         site: CallSite,
+        /// Call sits in an `if`/`for`/`while`/`match` header. The control line
+        /// already shows the snippet; expand prints it only when it resolves.
+        in_header: bool,
     },
 }
 

@@ -115,7 +115,7 @@ fn collect_call_edges(
                 collect_call_edges(children, from, index, nodes, edges, seen_ids, seq);
             }
             RawNode::NestedFn { .. } => {}
-            RawNode::Call { site } => {
+            RawNode::Call { site, in_header } => {
                 let uses = index.uses.get(&site.file).unwrap_or(&empty);
                 let target = resolve(site, index);
                 if should_omit_resolved(site, uses, target.is_some()) {
@@ -123,6 +123,7 @@ fn collect_call_edges(
                 }
                 let to = match target {
                     Some(id) => function_node_id(&id),
+                    None if *in_header => continue,
                     None => {
                         let leaf = format!("leaf:{}", site.display);
                         if seen_ids.insert(leaf.clone()) {
@@ -555,6 +556,18 @@ mod tests {
         match process {
             GraphNode::Function { entry, .. } => assert!(*entry),
             GraphNode::Leaf { .. } => panic!("process is a function"),
+        }
+    }
+
+    #[test]
+    fn graph_header_local_call_is_edge_from_caller() {
+        let g = graph("fn a() { for x in b() { return; } }\nfn b() -> i32 { return 1; }\n");
+        let a = fn_id(&g, "a");
+        let b = fn_id(&g, "b");
+        assert!(g.edges.iter().any(|e| e.from == a && e.to == b));
+        match fn_named(&g, "b") {
+            GraphNode::Function { entry, .. } => assert!(!*entry),
+            GraphNode::Leaf { .. } => panic!("b is a function"),
         }
     }
 }

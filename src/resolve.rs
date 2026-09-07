@@ -248,7 +248,7 @@ fn collect_resolved_callees(nodes: &[RawNode], index: &ResolveIndex, called: &mu
             RawNode::Control { children, .. } | RawNode::NestedFn { children, .. } => {
                 collect_resolved_callees(children, index, called);
             }
-            RawNode::Call { site } => {
+            RawNode::Call { site, .. } => {
                 if let Some(id) = resolve(site, index) {
                     called.insert(id);
                 }
@@ -364,7 +364,13 @@ fn expand_one_node(
             loc: None,
             children: expand_body_nodes(children, stack, seen, index),
         }],
-        RawNode::Call { site } => expand_call_site(site, stack, seen, index),
+        RawNode::Call { site, in_header } => {
+            if *in_header && resolve(site, index).is_none() {
+                Vec::new()
+            } else {
+                expand_call_site(site, stack, seen, index)
+            }
+        }
     }
 }
 

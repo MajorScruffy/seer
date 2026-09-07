@@ -80,7 +80,7 @@ Pain of alternatives: a TUI cannot lay out shared nodes. GPUI is a second native
 | `--format json` | Second printer of the same graph | Machines and the HTML payload. |
 | Nodes | All body-bearing defs, including nested fns | The index already has them. Nested is never an entry, but it is a node. |
 | Signatures | No node | No body. Same as tree: not an entry, not an expand target. |
-| Edges | From the enclosing `FnDef`, not from control nodes | Flat call graph. `if item.valid()` does not create an edge. `wrap(inner())` is two edges from the caller. |
+| Edges | From the enclosing `FnDef`, not from control nodes | Flat call graph. `if item.valid()` is an unresolved header call: no edge. `for x in grouped_opcodes(...)` is a resolved header call: edge from the caller. `wrap(inner())` is two edges from the caller. |
 | NestedFn in a body | Skip when walking edges | Inner calls live on the inner `FnDef`. A definition is not a call. |
 | Resolved call | Edge to that `FnId` | Shared node is the point of the feature. |
 | Unresolved / macro (kept) | Edge to a leaf keyed by display | Same snippet merges. `cross_file_no_search` keeps `handle()` leaf distinct from `fn handle`. |
@@ -203,12 +203,14 @@ walk_edges(raws, from, ...):
             Control { children }: walk_edges(children, from, ...)
             NestedFn { .. }: continue
                 # do not walk children. inner FnDef owns those calls.
-            Call { site }:
+            Call { site, in_header }:
                 uses = index.uses[site.file]
                 target = resolve(site, index)
                 if should_omit_resolved(site, uses, target.is_some()): continue
                 if target is Some(id):
                     to = "{id.file}:{id.start_byte}"
+                else if in_header:
+                    continue  # header already shows the snippet; no predicate leaf
                 else:
                     to = "leaf:{site.display}"
                     if to not in seen_ids:
@@ -558,6 +560,7 @@ Path for `cli_graph_subcommand`: the process_handle file. Stdout must be a `flow
 | `graph_mermaid_coalesces_duplicate_edges` | `call_in_let` Mermaid has one `-->` between `f` and `compute` |
 | `graph_html_embeds_json` | `process_handle` HTML starts with `<!DOCTYPE html>\n`; `#seer-graph` text is JSON with `<` → `\u003c`; no `<script src` |
 | `graph_call_in_args_is_edge_from_caller` | `wrap(inner())` is two edges from `outer`; `inner` is not an entry |
+| `graph_header_local_call_is_edge_from_caller` | `for x in b()` is an edge `a → b`; `b` is not an entry |
 
 ### Commands
 

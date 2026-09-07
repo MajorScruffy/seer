@@ -9,6 +9,16 @@ struct Ctx<'a> {
     src: &'a str,
     file: &'a str,
     uses: &'a UseMap,
+    in_header: bool,
+}
+
+impl<'a> Ctx<'a> {
+    fn header(&self) -> Self {
+        Self {
+            in_header: true,
+            ..*self
+        }
+    }
 }
 
 const METHOD_DECL: &str = "method_declaration";
@@ -77,7 +87,12 @@ fn walk_index<'a>(
 }
 
 pub fn extract_fn(fn_item: Node, src: &str, file: &str, uses: &UseMap) -> Vec<RawNode> {
-    let ctx = Ctx { src, file, uses };
+    let ctx = Ctx {
+        src,
+        file,
+        uses,
+        in_header: false,
+    };
     fn_item
         .child_by_field_name("body")
         .map(|body| walk(body, &ctx))
@@ -114,12 +129,12 @@ fn walk(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement" => {
             vec![RawNode::Control {
                 text: header_before_field(node, "body", ctx.src),
-                children: walk_field(node, "body", ctx),
+                children: header_then_body(node, "body", ctx),
             }]
         }
         "switch_expression" | "switch_statement" => vec![RawNode::Control {
             text: header_before_field(node, "body", ctx.src),
-            children: walk_field(node, "body", ctx),
+            children: header_then_body(node, "body", ctx),
         }],
         "switch_block" => walk_named(node, ctx),
         "switch_block_statement_group" | "switch_rule" => vec![RawNode::Control {
@@ -208,6 +223,24 @@ fn walk_field(node: Node, field: &str, ctx: &Ctx) -> Vec<RawNode> {
         .unwrap_or_default()
 }
 
+fn header_then_body(node: Node, body_field: &str, ctx: &Ctx) -> Vec<RawNode> {
+    let body = node.child_by_field_name(body_field);
+    let header = ctx.header();
+    let mut children = Vec::new();
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if body == Some(child) {
+                continue;
+            }
+            children.extend(walk(child, &header));
+        }
+    }
+    if let Some(body) = body {
+        children.extend(walk(body, ctx));
+    }
+    children
+}
+
 fn extract_if(node: Node, ctx: &Ctx) -> Vec<RawNode> {
     let mut out = Vec::new();
     let mut keyword = "if";
@@ -223,7 +256,11 @@ fn extract_if(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         } else {
             text
         };
-        let children = walk_field(current, "consequence", ctx);
+        let mut children = current
+            .child_by_field_name("condition")
+            .map(|c| walk(c, &ctx.header()))
+            .unwrap_or_default();
+        children.extend(walk_field(current, "consequence", ctx));
         out.push(RawNode::Control { text, children });
         let Some(alt) = current.child_by_field_name("alternative") else {
             break;
@@ -319,7 +356,10 @@ fn emit_site(node: Node, kind: CallKind, ctx: &Ctx) -> Vec<RawNode> {
     };
     let mut out = Vec::new();
     if !should_omit_at_extract(&site, ctx.uses) {
-        out.push(RawNode::Call { site });
+        out.push(RawNode::Call {
+            site,
+            in_header: ctx.in_header,
+        });
     }
     out.extend(walk_field(node, "arguments", ctx));
     out

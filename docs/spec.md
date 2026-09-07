@@ -75,7 +75,7 @@ Pain of alternatives: rust-analyzer needs a working sysroot and is slow on histo
 | Outline shape | Indentation-only, 2 spaces, no box-drawing | Line-oriented diff input. Normative example is law. |
 | External calls | Show as leaves, do not expand | Reviewers still see I/O and serde; no need for crate sources. |
 | Local calls | Expand in place under the call snippet | The outline is interprocedural from entry functions. |
-| Conditions | Text on the control line; not call nodes | `if items.is_empty()` stays one line; predicates are not expanded. |
+| Conditions | Text on the control line; local header callees still expand | `if items.is_empty()` stays one line. `match compute()` also expands `compute` under that match. |
 | Omit | Logging/debug APIs only | A local `fn info` is kept. `clone`/`unwrap`/`to_string` are kept. |
 | `std::` in print | `strip_std` on **call/macro display only**, never on control / return / match-arm text | Normative example prints `fs::write` for `std::fs::write`. `if std::fs::exists(p)` keeps `std::`. |
 | Recursion | `<call-snippet> [recursive]` and stop | Prevents infinite expand; uses definition identity, not name. |
@@ -342,11 +342,11 @@ Home of this table: **this section**. Other sections reference it; they do not r
 | `function_item` (the one being extracted) | Do not emit another `fn` line for itself. Walk `body`. |
 | `function_item` (nested inside the body) | Emit `fn {name}` (`name` field). Walk its `body` as children. Also index it as a definition. |
 | `if_expression` | See [If / else-if / else](#if--else-if--else). |
-| `for_expression` | Emit one control node. Header: [Headers](#header-reconstruction). Walk `body` only. **Do not** walk `pattern` or `value` for calls. |
-| `while_expression` | Emit one control node. Walk `body` only. **Do not** walk the condition. |
+| `for_expression` | Emit one control node. Header: [Headers](#header-reconstruction). Walk `value` as header calls, then `body`. **Do not** walk `pattern` for calls. |
+| `while_expression` | Emit one control node. Walk the condition as header calls, then `body`. |
 | `loop_expression` | Emit one control node. Walk `body` only. |
-| `match_expression` | Emit `match {scrutinee}`. Walk each `match_arm` in source order. **Do not** walk `value` (scrutinee) for calls. |
-| `match_arm` | Emit a child of the match whose text is the collapsed `pattern` field (`match_pattern`, includes `if` guard). Walk the arm `value` (block or expr). **Do not** walk the guard for calls. Skip `attribute_item` children. |
+| `match_expression` | Emit `match {scrutinee}`. Walk `value` (scrutinee) as header calls, then each `match_arm` in source order. |
+| `match_arm` | Emit a child of the match whose text is the collapsed `pattern` field (`match_pattern`, includes `if` guard). Walk the guard as header calls, then the arm `value`. Skip `attribute_item` children. |
 | `return_expression` | Emit collapsed full node (`return` or `return {expr}`). **Do not** walk the value for call nodes. |
 | `break_expression` | Emit collapsed full node. **Do not** walk the value. |
 | `continue_expression` | Emit collapsed full node. |
@@ -363,9 +363,9 @@ Home of this table: **this section**. Other sections reference it; they do not r
 | `ERROR` | Skip. |
 | Any other kind | Walk named children. Do not emit a node. |
 
-**Call-in-statement vs call-in-header.** A `call_expression` inside an `if`/`while` condition, `for` header, `match` scrutinee, match-arm guard, or another call’s callee (`function` field) is **not** visited. A `call_expression` in another call’s **arguments** is visited: `wrap(inner())` emits `wrap(inner())` then `inner()` as siblings under the caller. A `call_expression` that is a `let` value, an expression statement, an if/loop/match **body**, an assignment RHS, or a closure body **is** visited. Java `method_invocation` / `object_creation_expression` and TypeScript `call_expression` / `new_expression` walk `arguments` the same way. Macros still do not walk `token_tree`.
+**Call-in-statement vs call-in-header.** A `call_expression` inside an `if`/`while` condition, `for` header, `match` scrutinee, or match-arm guard **is** visited and marked `in_header`. Expand prints that call only when it resolves to a local function (so `match compute()` expands `compute`; `if items.is_empty()` does not grow an extra `is_empty()` line). A `call_expression` in another call’s callee (`function` field) is **not** visited. A `call_expression` in another call’s **arguments** is visited: `wrap(inner())` emits `wrap(inner())` then `inner()` as siblings under the caller. A `call_expression` that is a `let` value, an expression statement, an if/loop/match **body**, an assignment RHS, or a closure body **is** visited (not `in_header`). Java `method_invocation` / `object_creation_expression` and TypeScript `call_expression` / `new_expression` walk headers and `arguments` the same way. Macros still do not walk `token_tree`.
 
-**Check:** `tests/fixtures/tree/call_in_let` prints the `let` RHS call. `tests/fixtures/tree/call_in_args` prints `wrap(inner())` then expands `inner()`. `tests/fixtures/tree/process_handle` does **not** print `items.is_empty()`, `item.valid()`, or `item.ready()` as their own nodes. `tests/fixtures/tree/headers_keep_std_and_skip_calls` does **not** print `items.iter()` or `compute()` as call nodes.
+**Check:** `tests/fixtures/tree/call_in_let` prints the `let` RHS call. `tests/fixtures/tree/call_in_args` prints `wrap(inner())` then expands `inner()`. `tests/fixtures/tree/process_handle` does **not** print `items.is_empty()`, `item.valid()`, or `item.ready()` as their own nodes. `tests/fixtures/tree/headers_keep_std_and_skip_calls` does **not** print `items.iter()` or `std::fs::exists(p)` as call nodes; it **does** expand `compute()` under the `match`.
 
 #### If / else-if / else
 
@@ -390,7 +390,7 @@ fn extract_if(node) -> Vec<RawNode>:
     loop:
         cond_text = collapse_node(condition, source)
         text = keyword + " " + cond_text
-        children = walk(consequence block)
+        children = walk(condition as header calls) + walk(consequence block)
         out.push(Control { text, children })
         alt = current.child_by_field_name("alternative")  # else_clause or none
         if alt is None: break
@@ -1154,7 +1154,7 @@ Catalog:
 | `cycle_fallback` | mutual recursion, both printed as entries |
 | `nested_fn` | nested never-entry; define+call double-prints |
 | `diamond` | DAG re-expand of `d` at two sites |
-| `headers_keep_std_and_skip_calls` | `std::` on `if`; for/match headers not walked |
+| `headers_keep_std_and_skip_calls` | `std::` on `if`; `.iter()` stays header-only; local `compute()` expands under `match` |
 
 #### `tests/fixtures/tree/process_handle/input.rs`
 
@@ -1934,14 +1934,13 @@ fn f
   for x in items.iter()
     return
   match compute()
+    input.rs:13 compute()
+      return 1
     _
       return
-
-fn compute
-  return 1
 ```
 
-`strip_std` does not apply to the `if` line. `items.iter()` and `compute()` in headers are not call nodes, so `fn compute` remains an entry. `return 1` keeps the value.
+`strip_std` does not apply to the `if` line. `items.iter()` is unresolved in the header, so it is not a call node. `compute()` resolves, so it expands under the `match` and is not a second entry. `return 1` keeps the value.
 
 ---
 

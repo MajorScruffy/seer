@@ -13,6 +13,16 @@ struct Ctx<'a> {
     src: &'a str,
     file: &'a str,
     uses: &'a UseMap,
+    in_header: bool,
+}
+
+impl<'a> Ctx<'a> {
+    fn header(&self) -> Self {
+        Self {
+            in_header: true,
+            ..*self
+        }
+    }
 }
 
 /// Index every `function_item` and `function_signature_item` under `root`.
@@ -112,7 +122,12 @@ pub fn extract_fn(fn_item: Node, src: &str, file: &str, uses: &UseMap) -> Vec<Ra
         }
         _ => {}
     }
-    let ctx = Ctx { src, file, uses };
+    let ctx = Ctx {
+        src,
+        file,
+        uses,
+        in_header: false,
+    };
     fn_item
         .child_by_field_name("body")
         .map(|body| walk(body, &ctx))
@@ -156,22 +171,25 @@ fn raw_nodes_to_outline(nodes: &[RawNode]) -> Vec<crate::ir::OutlineNode> {
     use crate::ir::OutlineNode;
     nodes
         .iter()
-        .map(|n| match n {
-            RawNode::Control { text, children } => OutlineNode {
+        .filter_map(|n| match n {
+            RawNode::Control { text, children } => Some(OutlineNode {
                 text: text.clone(),
                 loc: None,
                 children: raw_nodes_to_outline(children),
-            },
-            RawNode::NestedFn { name, children } => OutlineNode {
+            }),
+            RawNode::NestedFn { name, children } => Some(OutlineNode {
                 text: format!("fn {name}"),
                 loc: None,
                 children: raw_nodes_to_outline(children),
-            },
-            RawNode::Call { site } => OutlineNode {
+            }),
+            RawNode::Call {
+                in_header: true, ..
+            } => None,
+            RawNode::Call { site, .. } => Some(OutlineNode {
                 text: site.display.clone(),
                 loc: None,
                 children: Vec::new(),
-            },
+            }),
         })
         .collect()
 }
@@ -182,11 +200,11 @@ fn walk(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         rust::IF_EXPRESSION => extract_if(node, ctx),
         rust::FOR_EXPRESSION => vec![RawNode::Control {
             text: header_for(node, ctx.src),
-            children: walk_field(node, "body", ctx),
+            children: header_then_body(node, "value", "body", ctx),
         }],
         rust::WHILE_EXPRESSION => vec![RawNode::Control {
             text: header_while(node, ctx.src),
-            children: walk_field(node, "body", ctx),
+            children: header_then_body(node, "condition", "body", ctx),
         }],
         rust::LOOP_EXPRESSION => vec![RawNode::Control {
             text: header_loop(node, ctx.src),
@@ -194,7 +212,14 @@ fn walk(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         }],
         rust::MATCH_EXPRESSION => vec![RawNode::Control {
             text: header_match(node, ctx.src),
-            children: walk_match_arms(node, ctx),
+            children: {
+                let mut children = node
+                    .child_by_field_name("value")
+                    .map(|v| walk(v, &ctx.header()))
+                    .unwrap_or_default();
+                children.extend(walk_match_arms(node, ctx));
+                children
+            },
         }],
         rust::MATCH_ARM => extract_match_arm(node, ctx),
         rust::RETURN_EXPRESSION | rust::BREAK_EXPRESSION | rust::CONTINUE_EXPRESSION => {
@@ -270,6 +295,15 @@ fn walk_field(node: Node, field: &str, ctx: &Ctx) -> Vec<RawNode> {
         .unwrap_or_default()
 }
 
+fn header_then_body(node: Node, header_field: &str, body_field: &str, ctx: &Ctx) -> Vec<RawNode> {
+    let mut children = node
+        .child_by_field_name(header_field)
+        .map(|n| walk(n, &ctx.header()))
+        .unwrap_or_default();
+    children.extend(walk_field(node, body_field, ctx));
+    children
+}
+
 /// Flat sibling chain: `if` / `else if` / `else` (not nested else→if).
 fn extract_if(node: Node, ctx: &Ctx) -> Vec<RawNode> {
     let mut out = Vec::new();
@@ -280,7 +314,11 @@ fn extract_if(node: Node, ctx: &Ctx) -> Vec<RawNode> {
             .child_by_field_name("condition")
             .map(|c| header_if(keyword, c, ctx.src))
             .unwrap_or_else(|| keyword.to_string());
-        let children = walk_field(current, "consequence", ctx);
+        let mut children = current
+            .child_by_field_name("condition")
+            .map(|c| walk(c, &ctx.header()))
+            .unwrap_or_default();
+        children.extend(walk_field(current, "consequence", ctx));
         out.push(RawNode::Control { text, children });
         let Some(alt) = current.child_by_field_name("alternative") else {
             break;
@@ -322,7 +360,11 @@ fn extract_match_arm(node: Node, ctx: &Ctx) -> Vec<RawNode> {
         .child_by_field_name("pattern")
         .map(|p| collapse_node(p, ctx.src))
         .unwrap_or_default();
-    let children = walk_field(node, "value", ctx);
+    let mut children = node
+        .child_by_field_name("guard")
+        .map(|g| walk(g, &ctx.header()))
+        .unwrap_or_default();
+    children.extend(walk_field(node, "value", ctx));
     vec![RawNode::Control { text, children }]
 }
 
@@ -359,7 +401,10 @@ fn emit_call(node: Node, ctx: &Ctx, is_macro: bool) -> Vec<RawNode> {
     };
     let mut out = Vec::new();
     if !should_omit_at_extract(&site, ctx.uses) {
-        out.push(RawNode::Call { site });
+        out.push(RawNode::Call {
+            site,
+            in_header: ctx.in_header,
+        });
     }
     if !is_macro {
         out.extend(walk_field(node, "arguments", ctx));
