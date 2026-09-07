@@ -349,14 +349,22 @@
     return Math.min(maxK, Math.max(Math.min(0.12, maxK), k));
   }
 
+  function centerX() {
+    if (!boxes.length) {
+      return;
+    }
+    var b = graphBounds();
+    pan.x = (canvas.clientWidth - pan.k * b.w) / 2 - pan.k * b.minX;
+  }
+
   function zoomAt(next, cx, cy) {
     next = clampK(next);
     if (next === pan.k) {
       return;
     }
-    pan.x = cx - ((cx - pan.x) * next) / pan.k;
     pan.y = cy - ((cy - pan.y) * next) / pan.k;
     pan.k = next;
+    centerX();
     paint();
   }
 
@@ -369,10 +377,9 @@
       return;
     }
     var b = graphBounds();
-    var k = widthFitK();
-    pan.k = k;
-    pan.x = (canvas.clientWidth - k * b.w) / 2 - k * b.minX;
-    pan.y = 24 - k * b.minY;
+    pan.k = widthFitK();
+    pan.y = 24 - pan.k * b.minY;
+    centerX();
   }
 
   function lerp(a, b, t) {
@@ -494,6 +501,7 @@
       fit();
     } else {
       pan.k = clampK(pan.k);
+      centerX();
     }
     paint();
   }
@@ -515,7 +523,7 @@
       showCode(b.node);
       paint();
     }
-    drag = { x: ev.clientX, y: ev.clientY, px: pan.x, py: pan.y, moved: false };
+    drag = { x: ev.clientX, y: ev.clientY, py: pan.y, moved: false };
     canvas.setPointerCapture(ev.pointerId);
   });
   canvas.addEventListener("pointermove", function (ev) {
@@ -537,8 +545,8 @@
     }
     drag.moved = true;
     canvas.style.cursor = "grabbing";
-    pan.x = drag.px + dx;
     pan.y = drag.py + dy;
+    centerX();
     paint();
   });
   canvas.addEventListener("pointerup", function () {
@@ -600,6 +608,7 @@
   window.addEventListener("resize", function () {
     sizeCanvas();
     pan.k = clampK(pan.k);
+    centerX();
     paint();
   });
 
