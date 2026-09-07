@@ -331,7 +331,7 @@ pub fn print_graph_html(graph: &CallGraph, files: &[(String, String)]) -> String
 <canvas id=\"canvas\" tabindex=\"0\"></canvas>\n\
 <div id=\"zoom-bar\">\n\
   <button type=\"button\" id=\"zoom-out\" title=\"Zoom out\">−</button>\n\
-  <button type=\"button\" id=\"zoom-fit\" title=\"Fit\">fit</button>\n\
+  <button type=\"button\" id=\"zoom-fit\" title=\"Fit width\">fit</button>\n\
   <button type=\"button\" id=\"zoom-in\" title=\"Zoom in\">+</button>\n\
 </div>\n\
 </div>\n\

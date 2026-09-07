@@ -321,8 +321,36 @@
     ctx.textBaseline = "alphabetic";
   }
 
+  function graphBounds() {
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    boxes.forEach(function (p) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + p.w);
+    });
+    return {
+      minX: minX,
+      minY: minY,
+      w: Math.max(1, maxX - minX),
+    };
+  }
+
+  function widthFitK() {
+    if (!boxes.length) {
+      return 1;
+    }
+    return canvas.clientWidth / (graphBounds().w + 48);
+  }
+
+  function clampK(k) {
+    var maxK = widthFitK();
+    return Math.min(maxK, Math.max(Math.min(0.12, maxK), k));
+  }
+
   function zoomAt(next, cx, cy) {
-    next = Math.min(8, Math.max(0.12, next));
+    next = clampK(next);
     if (next === pan.k) {
       return;
     }
@@ -340,24 +368,11 @@
     if (!boxes.length) {
       return;
     }
-    var minX = Infinity;
-    var minY = Infinity;
-    var maxX = -Infinity;
-    var maxY = -Infinity;
-    boxes.forEach(function (p) {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + p.w);
-      maxY = Math.max(maxY, p.y + p.h);
-    });
-    var w = canvas.clientWidth;
-    var h = canvas.clientHeight;
-    var gw = Math.max(1, maxX - minX);
-    var gh = Math.max(1, maxY - minY);
-    var k = Math.min(w / (gw + 48), h / (gh + 48), 1.25);
+    var b = graphBounds();
+    var k = widthFitK();
     pan.k = k;
-    pan.x = (w - k * gw) / 2 - k * minX;
-    pan.y = 24 - k * minY;
+    pan.x = (canvas.clientWidth - k * b.w) / 2 - k * b.minX;
+    pan.y = 24 - k * b.minY;
   }
 
   function lerp(a, b, t) {
@@ -477,6 +492,8 @@
     sizeCanvas();
     if (shouldFit !== false) {
       fit();
+    } else {
+      pan.k = clampK(pan.k);
     }
     paint();
   }
@@ -582,6 +599,7 @@
   });
   window.addEventListener("resize", function () {
     sizeCanvas();
+    pan.k = clampK(pan.k);
     paint();
   });
 
