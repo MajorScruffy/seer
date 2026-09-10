@@ -321,7 +321,7 @@ pub fn print_graph_html(graph: &CallGraph, files: &[(String, String)]) -> String
 <body>\n\
 <aside id=\"panel\">\n\
   <h1>seer graph</h1>\n\
-  <p id=\"hint\">A box is a function; boxes inside it are the functions it calls, left to right. Nested calls start expanded; the triangle collapses a callee. A dashed box with ↩ is a recursive call back to a function already on this path. Drag to pan vertically. Scroll, +/−, or the buttons to zoom.</p>\n\
+  <p id=\"hint\">A box is a function; boxes inside it are the functions it calls, left to right. The all view groups functions by crate role (lib, bins, tests, fixtures), then by file. Boxes start collapsed; the triangle expands a box. A dashed box with ↩ is a recursive call back to a function already on this path. Drag or scroll to pan vertically. Shift+scroll, +/−, or the buttons to zoom.</p>\n\
   <label>reachable from\n\
     <select id=\"entry\"><option value=\"\">all</option></select>\n\
   </label>\n\

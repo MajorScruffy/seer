@@ -22,6 +22,10 @@
   var CYCLE_STROKE = [192, 163, 110];
   var collapsed = {};
   var filterKeep = {};
+  // Boxes start collapsed; `collapsed` only records explicit user toggles.
+  function isCollapsed(key) {
+    return key in collapsed ? collapsed[key] : true;
+  }
 
   var fnIds = {};
   data.nodes.forEach(function (n) {
@@ -187,6 +191,84 @@
     });
   }
 
+  function groupOf(file) {
+    if (file === "src/main.rs") {
+      return "bin/main";
+    }
+    var bin = /^src\/bin\/([^/]+)\.rs$/.exec(file);
+    if (bin) {
+      return "bin/" + bin[1];
+    }
+    if (file === "src/" || file.indexOf("src/") === 0) {
+      return "lib";
+    }
+    if (file.indexOf("tests/fixtures/") === 0) {
+      return "fixtures";
+    }
+    if (file.indexOf("tests/") === 0) {
+      return "tests";
+    }
+    if (file === "<stdin>") {
+      return "stdin";
+    }
+    var i = file.indexOf("/");
+    return i === -1 ? "other" : file.slice(0, i);
+  }
+
+  function packRow(children) {
+    var rowX = 0;
+    var rowY = 0;
+    var rowH = 0;
+    var innerW = 0;
+    var innerH = 0;
+    children.forEach(function (child) {
+      if (rowX > 0 && rowX + child.w > MAX_INNER) {
+        rowX = 0;
+        rowY += rowH + GAP;
+        rowH = 0;
+      }
+      offsetBox(child, rowX, rowY);
+      rowX += child.w + GAP;
+      rowH = Math.max(rowH, child.h);
+      innerW = Math.max(innerW, rowX - GAP);
+      innerH = rowY + rowH;
+    });
+    children.forEach(function (child) {
+      offsetBox(child, INSET, HEADER + INSET);
+    });
+    return {
+      w: Math.max(NODE_W, innerW + INSET * 2),
+      h: HEADER + innerH + INSET * 2,
+    };
+  }
+
+  function layoutContainer(kind, key, title, sub, childBoxes) {
+    var isOpen = childBoxes.length > 0 && !isCollapsed(key);
+    var box = {
+      kind: kind,
+      key: key,
+      title: title,
+      sub: sub,
+      x: 0,
+      y: 0,
+      w: NODE_W,
+      h: NODE_H,
+      canExpand: childBoxes.length > 0,
+      isOpen: isOpen,
+      isCycle: false,
+      depth: kind === "group" ? -2 : -1,
+      children: [],
+    };
+    if (!isOpen) {
+      return box;
+    }
+    var size = packRow(childBoxes);
+    box.children = childBoxes;
+    box.w = size.w;
+    box.h = size.h;
+    return box;
+  }
+
   function layoutBox(id, ancestors, keep) {
     var node = fnIds[id];
     var path = ancestors.concat([id]);
@@ -194,8 +276,9 @@
     var isCycle = ancestors.indexOf(id) !== -1;
     var kids = isCycle ? [] : orderedCallees(id, keep);
     var canExpand = kids.length > 0;
-    var isOpen = canExpand && !collapsed[key];
+    var isOpen = canExpand && !isCollapsed(key);
     var box = {
+      kind: "fn",
       id: id,
       key: key,
       node: node,
@@ -213,31 +296,13 @@
       return box;
     }
     var packed = [];
-    var rowX = 0;
-    var rowY = 0;
-    var rowH = 0;
-    var innerW = 0;
-    var innerH = 0;
     kids.forEach(function (kid) {
-      var child = layoutBox(kid, path, keep);
-      if (rowX > 0 && rowX + child.w > MAX_INNER) {
-        rowX = 0;
-        rowY += rowH + GAP;
-        rowH = 0;
-      }
-      offsetBox(child, rowX, rowY);
-      packed.push(child);
-      rowX += child.w + GAP;
-      rowH = Math.max(rowH, child.h);
-      innerW = Math.max(innerW, rowX - GAP);
-      innerH = rowY + rowH;
+      packed.push(layoutBox(kid, path, keep));
     });
-    packed.forEach(function (child) {
-      offsetBox(child, INSET, HEADER + INSET);
-    });
+    var size = packRow(packed);
     box.children = packed;
-    box.w = Math.max(NODE_W, innerW + INSET * 2);
-    box.h = HEADER + innerH + INSET * 2;
+    box.w = size.w;
+    box.h = size.h;
     return box;
   }
 
@@ -414,9 +479,40 @@
       }
     });
     boxes.forEach(function (p) {
-      var n = p.node;
       var isSel = selected && selected.key === p.key;
       var isHov = hover && hover.key === p.key;
+      if (p.kind !== "fn") {
+        var gfill = p.kind === "group" ? [22, 27, 43] : [26, 30, 44];
+        if (isHov) {
+          gfill = lerpRgb(gfill, [80, 96, 128], 0.28);
+        }
+        if (isSel) {
+          gfill = lerpRgb(gfill, [70, 110, 180], 0.35);
+        }
+        ctx.fillStyle = cssRgb(gfill);
+        roundRect(p.x, p.y, p.w, p.h, 8);
+        ctx.fill();
+        ctx.strokeStyle =
+          isSel || p.depth < 0
+            ? "#7aa2f7"
+            : cssRgb(p.kind === "group" ? [90, 110, 150] : [58, 64, 84]);
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        ctx.fillStyle = "#8b93a7";
+        ctx.fillText(p.sub, p.x + 12, p.y + 18);
+        var maxChars = Math.max(4, Math.floor((p.w - 48) / 7));
+        var title =
+          p.title.length > maxChars ? p.title.slice(0, maxChars - 1) + "…" : p.title;
+        ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
+        ctx.fillStyle = "#e8eaed";
+        ctx.fillText(title, p.x + 12, p.y + 36);
+        if (p.canExpand) {
+          drawToggle(p, p.isOpen);
+        }
+        return;
+      }
+      var n = p.node;
       var t = maxDepth === 0 ? 0 : p.depth / maxDepth;
       var fill = lerpRgb(LEVEL_FIRST, LEVEL_LAST, t);
       if (p.isCycle) {
@@ -451,7 +547,7 @@
       ctx.fillText(n.name, p.x + 12, p.y + 36);
       if (p.isCycle) {
         drawCycleMark(p);
-      } else if (p.canExpand && p.depth > 0) {
+      } else if (p.canExpand) {
         drawToggle(p, p.isOpen);
       }
     });
@@ -473,13 +569,43 @@
     if (select.value && fnIds[select.value]) {
       roots = [layoutBox(select.value, [], keep)];
     } else {
-      var y = 0;
+      var byGroup = {};
       usefulEntryIds().forEach(function (id) {
-        var box = layoutBox(id, [], keep);
-        offsetBox(box, 0, y);
-        roots.push(box);
-        y += box.h + GAP * 2;
+        var g = groupOf(fnIds[id].file);
+        if (!byGroup[g]) {
+          byGroup[g] = [];
+        }
+        byGroup[g].push(id);
       });
+      var y = 0;
+      Object.keys(byGroup)
+        .sort()
+        .forEach(function (g) {
+          var byFile = {};
+          byGroup[g].forEach(function (id) {
+            var f = fnIds[id].file;
+            if (!byFile[f]) {
+              byFile[f] = [];
+            }
+            byFile[f].push(id);
+          });
+          var fileBoxes = Object.keys(byFile)
+            .sort()
+            .map(function (f) {
+              var fnBoxes = byFile[f].map(function (id) {
+                return layoutBox(id, [], keep);
+              });
+              var sub =
+                fnBoxes.length + (fnBoxes.length === 1 ? " function" : " functions");
+              return layoutContainer("file", "file\0" + f, f, sub, fnBoxes);
+            });
+          var gsub =
+            fileBoxes.length + (fileBoxes.length === 1 ? " file" : " files");
+          var gbox = layoutContainer("group", "group\0" + g, g, gsub, fileBoxes);
+          offsetBox(gbox, 0, y);
+          roots.push(gbox);
+          y += gbox.h + GAP * 2;
+        });
     }
     scene.roots = roots;
     boxes = [];
@@ -513,14 +639,20 @@
     }
     var pt = worldFromEvent(ev);
     var b = hit(pt);
-    if (b && b.canExpand && b.depth > 0 && pointInRect(pt, toggleRect(b))) {
-      collapsed[b.key] = !collapsed[b.key];
+    if (b && b.canExpand && pointInRect(pt, toggleRect(b))) {
+      collapsed[b.key] = !isCollapsed(b.key);
       relayout(filterKeep, false);
       return;
     }
     if (b) {
-      selected = b;
-      showCode(b.node);
+      if (b.kind === "fn") {
+        selected = b;
+        showCode(b.node);
+      } else {
+        selected = b;
+        detail.textContent = b.title;
+        code.textContent = "";
+      }
       paint();
     }
     drag = { x: ev.clientX, y: ev.clientY, py: pan.y, moved: false };
@@ -568,6 +700,12 @@
         dy *= 16;
       } else if (ev.deltaMode === 2) {
         dy *= canvas.clientHeight;
+      }
+      if (!ev.shiftKey) {
+        pan.y -= dy;
+        centerX();
+        paint();
+        return;
       }
       var factor = Math.exp(-dy * 0.003);
       if (factor > 0.96 && factor < 1.04) {
